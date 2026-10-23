@@ -1,0 +1,143 @@
+import type { DiscoveryDocument } from '@trailgate/core';
+import { Codes, isTrailGateError, TrailGateError, toErrorResponse } from '@trailgate/core';
+import type { ResolvedServerConfig, TrailGateServerOptions } from './config.ts';
+import { resolveConfig } from './config.ts';
+import { buildDiscoveryDocument } from './discovery.ts';
+import { createProtectedHandler } from './enforcement.ts';
+import {
+  decideConsent,
+  getConsentView,
+  grantStatus,
+  handleRevocationRequest,
+  redeemGrant,
+  revokeGrant,
+  submitGrantRequest,
+} from './lifecycle.ts';
+import type {
+  ConsentDecision,
+  ConsentOutcome,
+  ConsentView,
+  GrantStatusResponse,
+  HostRequest,
+  HostResponse,
+  ProtectedHandler,
+  RouteProtection,
+} from './types.ts';
+
+/**
+ * The configured TrailGate surface for one site. Returned values are
+ * framework-neutral `HostResponse`s; the host translates them into its own
+ * framework's response type.
+ */
+export interface TrailGateServer {
+  readonly config: ResolvedServerConfig;
+  /** Discovery document for `GET /.well-known/trailgate`. Recomputed per call. */
+  discoveryDocument(): DiscoveryDocument;
+  /** `POST <endpoints.grant_request>` (spec section 10.2). */
+  handleGrantRequest(req: HostRequest): Promise<HostResponse>;
+  /** Verbatim terms for the host's consent page (spec section 10.3). */
+  getConsent(requestId: string): Promise<ConsentView | undefined>;
+  /**
+   * Records the user's decision after the host's own authentication
+   * (spec section 10.3). `siteUserId` is required for approvals.
+   */
+  decideConsent(
+    requestId: string,
+    decision: ConsentDecision,
+    siteUserId?: string,
+  ): Promise<ConsentOutcome>;
+  /** `POST <endpoints.grant_redemption>` (spec section 10.4). */
+  handleRedemption(req: HostRequest): Promise<HostResponse>;
+  /** `GET <endpoints.grant_status>` (spec section 10.5). */
+  handleStatus(req: HostRequest): Promise<HostResponse>;
+  /**
+   * `POST <endpoints.grant_revocation>`.
+   * @provisional The endpoint body and caller model are not yet specified in
+   * draft 0.1; requires a configured `revocationAuthorizer`.
+   */
+  handleRevocation(req: HostRequest): Promise<HostResponse>;
+  /** Host-initiated revocation from authenticated site surfaces (spec section 13). */
+  revokeGrant(jti: string, input: { reason: string; actor: string }): Promise<void>;
+  /**
+   * Enforces the spec section 11 pipeline around a host handler. The returned
+   * function yields complete `HostResponse`s (denials and receipts included)
+   * and never throws for protocol-level failures.
+   */
+  protect(
+    route: RouteProtection,
+    handler: ProtectedHandler,
+  ): (req: HostRequest) => Promise<HostResponse>;
+}
+
+function json(status: number, body: unknown): HostResponse {
+  return { status, headers: { 'content-type': 'application/json' }, body };
+}
+
+function errorResponse(err: unknown): HostResponse {
+  const error = isTrailGateError(err)
+    ? err
+    : new TrailGateError(Codes.INTERNAL_ERROR, 'internal error');
+  return json(error.httpStatus, toErrorResponse(error));
+}
+
+/** Composes storage ports, lifecycle flows, and enforcement into one surface. */
+export function createTrailGateServer(options: TrailGateServerOptions): TrailGateServer {
+  const config = resolveConfig(options);
+  return {
+    config,
+    discoveryDocument: () => buildDiscoveryDocument(config),
+    handleGrantRequest: async (req) => {
+      try {
+        return json(201, await submitGrantRequest(parseJson(req.body), config));
+      } catch (err) {
+        return errorResponse(err);
+      }
+    },
+    getConsent: (requestId) => getConsentView(requestId, config),
+    decideConsent: (requestId, decision, siteUserId) =>
+      decideConsent(requestId, decision, siteUserId, config),
+    handleRedemption: async (req) => {
+      try {
+        const body = parseJson(req.body);
+        return json(200, await redeemGrant(body, config));
+      } catch (err) {
+        return errorResponse(err);
+      }
+    },
+    handleStatus: async (req) => {
+      try {
+        const params = new URL(req.url).searchParams;
+        const query: { request_id?: string; grant_id?: string } = {};
+        const requestId = params.get('request_id');
+        const grantId = params.get('grant_id');
+        if (requestId !== null) {
+          query.request_id = requestId;
+        }
+        if (grantId !== null) {
+          query.grant_id = grantId;
+        }
+        const status: GrantStatusResponse = await grantStatus(query, config);
+        return json(200, status);
+      } catch (err) {
+        return errorResponse(err);
+      }
+    },
+    handleRevocation: (req) =>
+      handleRevocationRequest(req, config).catch((err) => errorResponse(err)),
+    revokeGrant: (jti, input) => revokeGrant(jti, input, config),
+    protect: (route, handler) => createProtectedHandler(route, handler, config),
+  };
+}
+
+function parseJson(body: HostRequest['body']): unknown {
+  const text =
+    body === undefined ? '' : typeof body === 'string' ? body : new TextDecoder().decode(body);
+  if (text === '') {
+    return {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new TrailGateError(Codes.REQUEST_MALFORMED, 'request body is not valid json');
+  }
+}

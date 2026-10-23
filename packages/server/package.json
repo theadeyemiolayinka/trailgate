@@ -17,7 +17,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test \"src/**/*.test.ts\""
   },
+  "dependencies": {
+    "@trailgate/core": "workspace:*",
+    "jose": "catalog:"
+  },
   "devDependencies": {
+    "@trailgate/test-fixtures": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }
