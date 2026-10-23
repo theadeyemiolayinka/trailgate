@@ -1,4 +1,4 @@
-import { productCount } from '../domain/catalog.ts';
+import { getProduct, productCount } from '../domain/catalog.ts';
 import { SHOP_CURRENCY } from '../domain/money.ts';
 import { createUser, saveAddress } from '../domain/users.ts';
 import { topUp } from '../domain/wallet.ts';
@@ -187,6 +187,24 @@ export function seedIfEmpty(db: Db, now = Math.floor(Date.now() / 1000)): void {
   });
   // Simulated opening balance for the demo wallet.
   topUp(db, user.id, { amount: 25000, currency: SHOP_CURRENCY }, now);
+
+  // Second user with one paid order, so cross-user resource denial can be
+  // demonstrated deterministically (resource order:ord_bill_seed01).
+  const bill = createUser(
+    db,
+    { email: 'bill@example.com', name: 'Bill Hart', password: 'demo-pass-1234' },
+    { now, id: 'usr_bill' },
+  );
+  topUp(db, bill.id, { amount: 5000, currency: SHOP_CURRENCY }, now);
+  const billMug = getProduct(db, 'drk-mug-01');
+  db.prepare(
+    `INSERT INTO orders (id, user_id, status, total_minor, currency, address_id, placed_via, created_at, paid_at)
+     VALUES ('ord_bill_seed01', ?, 'paid', ?, 'USD', NULL, 'user', ?, ?)`,
+  ).run(bill.id, billMug?.price.amount ?? 2400, now, now);
+  db.prepare(
+    `INSERT INTO order_items (order_id, sku, name, qty, unit_price_minor)
+     VALUES ('ord_bill_seed01', 'drk-mug-01', ?, 1, ?)`,
+  ).run(billMug?.name ?? 'Stoneware Mug', billMug?.price.amount ?? 2400);
 }
 
 export { DEMO_USER };

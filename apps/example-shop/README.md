@@ -53,6 +53,19 @@ The script uses the real Agent SDK (`createAgentClient`) over real HTTP with a l
 
 Constraint flags: `pnpm demo -- --budget 8000 --max 3000` (minor units).
 
+## Reset
+
+```sh
+# stop the server, then:
+rm -rf data dev-certs
+pnpm dev   # re-migrates and re-seeds deterministically
+```
+
+## Judge walkthrough
+
+`docs/DEMO.md` has the full 12-scenario demonstration guide with expected
+outcomes, reproducible setup, and an honest statement of guarantees.
+
 ## What the site demonstrates
 
 - **Permission vocabulary**: `tg.catalog.read`, `tg.cart.read`, `tg.cart.write`, `tg.order.create`, `tg.order.read`, `tg.wallet.read`, `tg.wallet.charge`.
