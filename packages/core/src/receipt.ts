@@ -4,19 +4,30 @@ import { requestDigestOf } from './digest.ts';
 import { Codes, TrailGateError } from './errors.ts';
 import { base64urlEncode } from './jwk.ts';
 import { checkJwsHeader, decodeCompactJws, type JwtAlgorithm, verifyJwsSignature } from './jwt.ts';
-import type { KeyResolver } from './ports.ts';
+import { callPort, type KeyResolver } from './ports.ts';
 import { SCHEMA_IDS, schemaRegistry } from './schemas.ts';
 import type { Jwk, Money, ReceiptPayload } from './types.ts';
 
 export const RECEIPT_TYP = 'trailgate-receipt+jwt';
 
-export function parseReceiptPayload(payload: unknown): ReceiptPayload {
+export function parseReceiptPayload(
+  payload: unknown,
+  knownCriticalFields: readonly string[] = [],
+): ReceiptPayload {
   if (!schemaRegistry().validate(SCHEMA_IDS.receipt, payload)) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'receipt payload failed schema validation', {
       schema: schemaRegistry().errors(SCHEMA_IDS.receipt),
     });
   }
-  return payload as ReceiptPayload;
+  const typed = payload as ReceiptPayload;
+  const known = new Set(knownCriticalFields);
+  const unknownCritical = (typed.critical ?? []).filter((field) => !known.has(field));
+  if (unknownCritical.length > 0) {
+    throw new TrailGateError(Codes.REQUEST_MALFORMED, 'receipt lists unknown critical fields', {
+      unknown: unknownCritical,
+    });
+  }
+  return typed;
 }
 
 export interface BuildReceiptInput {
@@ -39,7 +50,7 @@ export function buildReceiptPayload(input: BuildReceiptInput): ReceiptPayload {
     decision: input.decision,
     audit_id: input.auditId,
   };
-  if (input.code !== undefined) {
+  if (input.decision === 'denied' && input.code !== undefined) {
     tg.code = input.code;
   }
   if (input.amounts !== undefined) {
@@ -77,6 +88,8 @@ export interface VerifyReceiptDeps {
   issuer: string;
   audience: string;
   expectedRequestDigest?: string;
+  expectedGrantId?: string;
+  knownCriticalFields?: readonly string[];
 }
 
 export async function verifyReceipt(
@@ -89,17 +102,23 @@ export async function verifyReceipt(
   if (typeof kid !== 'string' || kid.length === 0) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'receipt header missing kid');
   }
-  const key = await deps.resolveSiteKey.resolve(kid);
+  const key = await callPort(
+    () => deps.resolveSiteKey.resolve(kid),
+    'receipt signing key is unavailable',
+  );
   if (key === undefined) {
     throw new TrailGateError(Codes.INTERNAL_UNAVAILABLE, 'receipt signing key is unresolvable');
   }
   const verified = await verifyJwsSignature(token, key, alg, Codes.REQUEST_MALFORMED);
-  const payload = parseReceiptPayload(verified);
+  const payload = parseReceiptPayload(verified, deps.knownCriticalFields);
   if (payload.iss !== deps.issuer) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'receipt issuer mismatch');
   }
   if (payload.aud !== deps.audience) {
     throw new TrailGateError(Codes.REQUEST_AUDIENCE_MISMATCH, 'receipt audience mismatch');
+  }
+  if (deps.expectedGrantId !== undefined && payload.tg.grant_id !== deps.expectedGrantId) {
+    throw new TrailGateError(Codes.REQUEST_MALFORMED, 'receipt answers a different grant');
   }
   if (
     deps.expectedRequestDigest !== undefined &&

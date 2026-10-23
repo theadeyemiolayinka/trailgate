@@ -274,6 +274,87 @@ describe('verifyProtectedRequest', () => {
     assert.equal(result.context.subject, 'sub_1');
   });
 
+  it('denies owned resources to grants without a subject', async () => {
+    const { req } = await makeRequest();
+    await expectCode(Codes.REQUEST_RESOURCE_DENIED, () =>
+      verifyProtectedRequest(
+        req,
+        deps({
+          touchedResource: 'order:ord_1',
+          resourceOwners: { ownerOf: async () => 'sub_1' },
+        }),
+      ),
+    );
+  });
+
+  it('fails closed when a security-critical port throws', async () => {
+    const failingRevocation: RevocationChecker = {
+      isRevoked: async () => {
+        throw new Error('redis timeout');
+      },
+    };
+    const { req } = await makeRequest();
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () =>
+      verifyProtectedRequest(req, deps({ revocation: failingRevocation })),
+    );
+  });
+
+  it('fails closed when the nonce store throws', async () => {
+    const nonceStore: NonceStore = {
+      claim: async () => {
+        throw new Error('connection refused');
+      },
+    };
+    const { req } = await makeRequest();
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () =>
+      verifyProtectedRequest(req, deps({ nonceStore })),
+    );
+  });
+
+  it('fails closed when the resource resolver throws', async () => {
+    const { req } = await makeRequest({ grantOverrides: { sub: 'sub_1' } });
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () =>
+      verifyProtectedRequest(
+        req,
+        deps({
+          touchedResource: 'order:ord_1',
+          resourceOwners: {
+            ownerOf: async () => {
+              throw new Error('db down');
+            },
+          },
+        }),
+      ),
+    );
+  });
+
+  it('fails closed when the ledger throws during budget evaluation', async () => {
+    const { req } = await makeRequest({
+      grantOverrides: {
+        constraints: [makeConstraint('cumulative_budget', { amount: 5000, currency: 'USD' })],
+      },
+    });
+    const ledger: Ledger = {
+      consumedMinorUnits: async () => {
+        throw new Error('ledger offline');
+      },
+      reservedMinorUnits: async () => 0,
+    };
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () =>
+      verifyProtectedRequest(req, deps({ ledger })),
+    );
+  });
+
+  it('maps site policy crashes to internal error', async () => {
+    const policy: SitePolicy = {
+      authorize: async () => {
+        throw new TypeError('site bug');
+      },
+    };
+    const { req } = await makeRequest();
+    await expectCode(Codes.INTERNAL_ERROR, () => verifyProtectedRequest(req, deps({ policy })));
+  });
+
   it('enforces grant constraints against the request amount', async () => {
     const { req } = await makeRequest();
     await expectCode(Codes.CONSTRAINT_VIOLATED, () =>
@@ -340,6 +421,14 @@ describe('verifyProtectedRequest', () => {
     await expectCode(Codes.REQUEST_SIGNATURE_INVALID, () => verifyProtectedRequest(req, deps()));
   });
 
+  it('rejects a signature header missing the tg label', async () => {
+    const { req } = await makeRequest();
+    const headers = { ...req.headers, signature: 'other=:AAAA:' };
+    await expectCode(Codes.REQUEST_SIGNATURE_INVALID, () =>
+      verifyProtectedRequest({ ...req, headers }, deps()),
+    );
+  });
+
   it('rejects grants carrying permissions outside the site vocabulary', async () => {
     const { req } = await makeRequest();
     await expectCode(Codes.GRANT_MALFORMED, () =>
@@ -360,6 +449,22 @@ describe('verifyProtectedRequest', () => {
       },
     });
     await expectCode(Codes.CONSTRAINT_VIOLATED, () =>
+      verifyProtectedRequest(req, deps({ rateLimiter })),
+    );
+  });
+
+  it('fails closed when the rate limiter throws', async () => {
+    const rateLimiter: RateLimiter = {
+      countInWindow: async () => {
+        throw new Error('counter offline');
+      },
+    };
+    const { req } = await makeRequest({
+      grantOverrides: {
+        constraints: [makeConstraint('rate_limit', { max_requests: 60, window_seconds: 3600 })],
+      },
+    });
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () =>
       verifyProtectedRequest(req, deps({ rateLimiter })),
     );
   });

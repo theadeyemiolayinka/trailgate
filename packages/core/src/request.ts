@@ -17,7 +17,7 @@ import type {
   SitePolicy,
   VerifiedRequestContext,
 } from './ports.ts';
-import { systemClock } from './ports.ts';
+import { callPort, systemClock } from './ports.ts';
 import { assertResourceAllowed } from './resources.ts';
 import {
   buildSignatureBase,
@@ -144,7 +144,11 @@ export async function verifyProtectedRequest(
     }
   }
 
-  if (await deps.revocation.isRevoked(grant.jti)) {
+  const revoked = await callPort(
+    () => deps.revocation.isRevoked(grant.jti),
+    'revocation state is unavailable',
+  );
+  if (revoked) {
     throw new TrailGateError(Codes.GRANT_REVOKED, 'grant is revoked');
   }
 
@@ -154,7 +158,10 @@ export async function verifyProtectedRequest(
       'signature keyid does not match grant key binding',
     );
   }
-  const agentJwk = await deps.resolveAgentKey.resolve(grant.cnf.jkt);
+  const agentJwk = await callPort(
+    () => deps.resolveAgentKey.resolve(grant.cnf.jkt),
+    'agent key resolution is unavailable',
+  );
   if (agentJwk === undefined) {
     throw new TrailGateError(Codes.REQUEST_SIGNATURE_INVALID, 'agent key is unresolvable');
   }
@@ -178,10 +185,9 @@ export async function verifyProtectedRequest(
   }
 
   const signatureWindowTtl = MAX_SIGNATURE_WINDOW_SECONDS + tolerance;
-  const nonceIsFresh = await deps.nonceStore.claim(
-    grant.jti,
-    signatureInput.params.nonce,
-    signatureWindowTtl,
+  const nonceIsFresh = await callPort(
+    () => deps.nonceStore.claim(grant.jti, signatureInput.params.nonce, signatureWindowTtl),
+    'nonce store is unavailable',
   );
   if (!nonceIsFresh) {
     throw new TrailGateError(Codes.REQUEST_REPLAY_DETECTED, 'nonce already seen for this grant');
@@ -196,8 +202,12 @@ export async function verifyProtectedRequest(
     .digest('base64url');
   let idempotentReplay = false;
   const idempotencyKey = getHeader(req, 'idempotency-key');
-  if (deps.idempotency !== undefined && idempotencyKey !== undefined) {
-    const record = await deps.idempotency.lookup(grant.jti, idempotencyKey);
+  const idempotencyStore = deps.idempotency;
+  if (idempotencyStore !== undefined && idempotencyKey !== undefined) {
+    const record = await callPort(
+      () => idempotencyStore.lookup(grant.jti, idempotencyKey),
+      'idempotency store is unavailable',
+    );
     if (record !== undefined) {
       if (record.requestDigest !== operationDigest) {
         throw new TrailGateError(
@@ -243,7 +253,14 @@ export async function verifyProtectedRequest(
     ...(grant.sub !== undefined ? { subject: grant.sub } : {}),
   };
   if (deps.policy !== undefined) {
-    await deps.policy.authorize(context);
+    try {
+      await deps.policy.authorize(context);
+    } catch (err) {
+      if (err instanceof TrailGateError) {
+        throw err;
+      }
+      throw new TrailGateError(Codes.INTERNAL_ERROR, 'site policy check failed');
+    }
   }
 
   return { grant, requestDigest, signatureBase, idempotentReplay, context };

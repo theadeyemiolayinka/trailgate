@@ -7,6 +7,8 @@ import type { Jwk } from './types.ts';
 export const ALLOWED_JWT_ALGORITHMS = ['EdDSA', 'ES256'] as const;
 export type JwtAlgorithm = (typeof ALLOWED_JWT_ALGORITHMS)[number];
 
+const FORBIDDEN_HEADER_PARAMS = ['jwk', 'jku', 'x5c', 'x5u', 'x5t', 'x5t#S256'] as const;
+
 export interface DecodedJws {
   header: Record<string, unknown>;
   payload: unknown;
@@ -51,6 +53,14 @@ export function checkJwsHeader(header: Record<string, unknown>, expectedTyp: str
   }
   if (header['crit'] !== undefined) {
     throw new TrailGateError(Codes.GRANT_MALFORMED, 'crit header parameters are not supported');
+  }
+  for (const name of FORBIDDEN_HEADER_PARAMS) {
+    if (header[name] !== undefined) {
+      throw new TrailGateError(
+        Codes.GRANT_MALFORMED,
+        `jws header parameter ${name} is not supported`,
+      );
+    }
   }
   return alg as JwtAlgorithm;
 }

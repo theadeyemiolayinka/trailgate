@@ -53,6 +53,18 @@ describe('parseSignatureInput', () => {
     expectMalformed(() => parseSignatureInput('tg("@method")'));
     expectMalformed(() => parseSignatureInput(''));
   });
+
+  it('rejects inner-list items without space separation', () => {
+    expectMalformed(() => parseSignatureInput('tg=("@method""@path");keyid="k"'));
+  });
+
+  it('rejects duplicate parameters', () => {
+    expectMalformed(() => parseSignatureInput('tg=("@method");keyid="a";keyid="b"'));
+  });
+
+  it('rejects tokens containing invalid characters', () => {
+    expectMalformed(() => parseSignatureInput('tg:x=("@method");keyid="k"'));
+  });
 });
 
 describe('parseSignatureField', () => {
@@ -64,6 +76,11 @@ describe('parseSignatureField', () => {
 
   it('rejects non-byte-sequence values', () => {
     expectMalformed(() => parseSignatureField('tg="abc"'));
+  });
+
+  it('rejects duplicate signature labels', () => {
+    const b64 = Buffer.from('x').toString('base64');
+    expectMalformed(() => parseSignatureField(`tg=:${b64}:, tg=:${b64}:`));
   });
 });
 

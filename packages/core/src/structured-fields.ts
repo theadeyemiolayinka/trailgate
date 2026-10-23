@@ -12,7 +12,7 @@ export interface SfSignatureEntry {
   params: Record<string, SfValue>;
 }
 
-const TOKEN_CHAR = /^[a-zA-Z0-9!#$%&'*+\-.^_`|~:/]/;
+const TOKEN_CHAR = /^[a-zA-Z0-9!#$%&'*+\-.^_`|~]/;
 
 function fail(message: string): never {
   throw new TrailGateError(Codes.REQUEST_MALFORMED, message);
@@ -125,6 +125,9 @@ function parseParams(input: string, pos: number): [Record<string, SfValue>, numb
     pos = skipOws(input, pos + 1);
     const [key, afterKey] = parseKey(input, pos);
     pos = afterKey;
+    if (params[key] !== undefined) {
+      fail(`duplicate parameter: ${key}`);
+    }
     if (input[pos] === '=') {
       const [value, afterValue] = parseValue(input, pos + 1);
       params[key] = value;
@@ -150,6 +153,9 @@ function parseInnerList(input: string, pos: number): [SfItem[], number] {
     const [value, afterValue] = parseValue(input, pos);
     const [params, afterParams] = parseParams(input, afterValue);
     items.push({ value, params });
+    if (afterParams < input.length && input[afterParams] !== ' ' && input[afterParams] !== ')') {
+      fail('inner list items must be separated by a space');
+    }
     pos = skipOws(input, afterParams);
   }
   fail('unterminated inner list');
@@ -199,6 +205,9 @@ export function parseSignatureField(headerValue: string): Map<string, Uint8Array
     }
     pos = skipOws(headerValue, pos + 1);
     const [bytes, afterBytes] = parseByteSequence(headerValue, pos);
+    if (entries.has(label)) {
+      fail(`duplicate signature label: ${label}`);
+    }
     entries.set(label, bytes);
     pos = skipOws(headerValue, afterBytes);
     if (pos >= headerValue.length) {

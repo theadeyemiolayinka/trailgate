@@ -128,6 +128,15 @@ describe('verifyGrant', () => {
     );
   });
 
+  it('rejects jws headers carrying embedded key material', async () => {
+    const token = await grantToken();
+    const [, payloadPart, signaturePart] = token.split('.');
+    const forgedHeader = Buffer.from(
+      JSON.stringify({ alg: 'EdDSA', typ: GRANT_TYP, kid: SITE_KID, jwk: { kty: 'OKP' } }),
+    ).toString('base64url');
+    expectGrantMalformed(() => parseGrant(`${forgedHeader}.${payloadPart}.${signaturePart}`));
+  });
+
   it('rejects grants declaring unknown critical fields', async () => {
     const payload = makeGrantPayload({ jkt: agent.jkt, iat: NOW - 60, exp: NOW + 3600 });
     payload['critical'] = ['mystery_extension'];

@@ -59,6 +59,8 @@ pnpm verify
 - `internal/PHASES.md`: staged build plan and integration milestones.
 - `docs/architecture.md`: components and trust boundaries.
 - `docs/threat-model.md`: assets, attackers, surfaces, mitigations, open risks.
+- `docs/security-review-0.1.md`: adversarial audit findings and requirement-to-test matrix.
+- `docs/security-guarantees.md`: what `packages/core` does and does not guarantee.
 - `docs/decisions/`: architecture decision records.
 - `docs/research/protocol-references.md`: standards research behind the contract.
 - `docs/handoff.md`: which schema and interface each owner implements next.

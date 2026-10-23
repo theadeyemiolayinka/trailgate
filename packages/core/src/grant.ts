@@ -1,6 +1,6 @@
 import { Codes, TrailGateError } from './errors.ts';
 import { checkJwsHeader, decodeCompactJws, verifyJwsSignature } from './jwt.ts';
-import type { KeyResolver } from './ports.ts';
+import { callPort, type KeyResolver } from './ports.ts';
 import { SCHEMA_IDS, schemaRegistry } from './schemas.ts';
 import type { GrantPayload } from './types.ts';
 
@@ -56,7 +56,10 @@ export async function verifyGrant(
   if (typeof kid !== 'string' || kid.length === 0) {
     throw new TrailGateError(Codes.GRANT_MALFORMED, 'grant header missing kid');
   }
-  const key = await deps.resolveSiteKey.resolve(kid);
+  const key = await callPort(
+    () => deps.resolveSiteKey.resolve(kid),
+    'grant signing key is unavailable',
+  );
   if (key === undefined) {
     throw new TrailGateError(Codes.INTERNAL_UNAVAILABLE, 'grant signing key is unresolvable');
   }

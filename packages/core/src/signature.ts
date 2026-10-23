@@ -86,7 +86,7 @@ export function componentIdentifier(item: SfItem): string {
   }
   if (Object.keys(item.params).length > 0) {
     throw new TrailGateError(
-      Codes.REQUEST_MALFORMED,
+      Codes.REQUEST_SIGNATURE_INVALID,
       'component parameters are not supported in this profile',
     );
   }
@@ -244,7 +244,10 @@ export function getSignatureBytes(headerValue: string, label = SIGNATURE_LABEL):
   const entries = parseSignatureField(headerValue);
   const bytes = entries.get(label);
   if (bytes === undefined) {
-    throw new TrailGateError(Codes.REQUEST_MALFORMED, `missing signature for label: ${label}`);
+    throw new TrailGateError(
+      Codes.REQUEST_SIGNATURE_INVALID,
+      `missing signature for label: ${label}`,
+    );
   }
   return bytes;
 }

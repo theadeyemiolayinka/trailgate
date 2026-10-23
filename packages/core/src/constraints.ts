@@ -1,5 +1,5 @@
 import { Codes, TrailGateError } from './errors.ts';
-import type { Ledger, RateLimiter } from './ports.ts';
+import { callPort, type Ledger, type RateLimiter } from './ports.ts';
 import { SCHEMA_IDS, schemaRegistry } from './schemas.ts';
 import type { Constraint, Money } from './types.ts';
 
@@ -67,9 +67,16 @@ async function evaluateCumulativeBudget(
       'cumulative_budget cannot be evaluated without a ledger',
     );
   }
+  const ledger = ctx.ledger;
   const [consumed, reserved] = await Promise.all([
-    ctx.ledger.consumedMinorUnits(ctx.grantId, budget.currency),
-    ctx.ledger.reservedMinorUnits(ctx.grantId, budget.currency),
+    callPort(
+      () => ledger.consumedMinorUnits(ctx.grantId, budget.currency),
+      'ledger is unavailable',
+    ),
+    callPort(
+      () => ledger.reservedMinorUnits(ctx.grantId, budget.currency),
+      'ledger is unavailable',
+    ),
   ]);
   const requested =
     ctx.requestAmount !== undefined && ctx.requestAmount.currency === budget.currency
@@ -97,7 +104,11 @@ async function evaluateRateLimit(
       'rate_limit cannot be evaluated without a counter',
     );
   }
-  const count = await ctx.rateLimiter.countInWindow(ctx.grantId, windowSeconds, ctx.now);
+  const rateLimiter = ctx.rateLimiter;
+  const count = await callPort(
+    () => rateLimiter.countInWindow(ctx.grantId, windowSeconds, ctx.now),
+    'rate limiter is unavailable',
+  );
   if (count >= maxRequests) {
     throw new TrailGateError(Codes.CONSTRAINT_VIOLATED, 'rate_limit exceeded', {
       type: 'rate_limit',

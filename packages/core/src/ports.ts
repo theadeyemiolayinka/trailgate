@@ -1,4 +1,16 @@
+import { Codes, TrailGateError } from './errors.ts';
 import type { Jwk } from './types.ts';
+
+export async function callPort<T>(fn: () => Promise<T>, unavailable: string): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof TrailGateError) {
+      throw err;
+    }
+    throw new TrailGateError(Codes.INTERNAL_UNAVAILABLE, unavailable);
+  }
+}
 
 export interface Clock {
   now(): number;

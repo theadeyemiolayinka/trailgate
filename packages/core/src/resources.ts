@@ -1,5 +1,5 @@
 import { Codes, TrailGateError } from './errors.ts';
-import type { ResourceOwnerResolver } from './ports.ts';
+import { callPort, type ResourceOwnerResolver } from './ports.ts';
 
 export async function assertResourceAllowed(
   selectors: readonly string[],
@@ -12,11 +12,14 @@ export async function assertResourceAllowed(
       resource: resourceId,
     });
   }
-  const resourceOwner = await owner.ownerOf(resourceId);
+  const resourceOwner = await callPort(
+    () => owner.ownerOf(resourceId),
+    'resource ownership cannot be checked',
+  );
   if (resourceOwner === undefined) {
     throw new TrailGateError(Codes.REQUEST_RESOURCE_DENIED, 'resource is unknown to this site');
   }
-  if (subject !== undefined && resourceOwner !== subject) {
+  if (resourceOwner !== subject) {
     throw new TrailGateError(Codes.REQUEST_RESOURCE_DENIED, 'resource belongs to another context');
   }
 }

@@ -60,6 +60,21 @@ describe('buildReceiptPayload', () => {
     assert.equal(payload.tg.decision, 'denied');
     assert.equal(payload.tg.code, 'tg.constraint.violated');
   });
+
+  it('omits code on allowed decisions even when provided', () => {
+    const payload = buildReceiptPayload({
+      issuer: FIXTURE_ORIGIN,
+      audience: FIXTURE_ORIGIN,
+      grantId: 'grt_1',
+      signatureBase: 'x',
+      decision: 'allowed',
+      code: 'tg.constraint.violated',
+      auditId: 'aud_1',
+      now: NOW,
+    });
+    assert.equal(payload.tg.decision, 'allowed');
+    assert.equal(payload.tg.code, undefined);
+  });
 });
 
 describe('parseReceiptPayload', () => {
@@ -118,5 +133,31 @@ describe('verifyReceipt', () => {
   it('rejects receipts for another audience', async () => {
     const token = await receipt({ audience: 'https://other.example.com' });
     await expectCode(Codes.REQUEST_AUDIENCE_MISMATCH, () => verifyReceipt(token, DEPS));
+  });
+
+  it('rejects receipts answering a different grant', async () => {
+    const token = await receipt();
+    await expectCode(Codes.REQUEST_MALFORMED, () =>
+      verifyReceipt(token, { ...DEPS, expectedGrantId: 'grt_other' }),
+    );
+    await verifyReceipt(token, { ...DEPS, expectedGrantId: 'grt_1' });
+  });
+
+  it('rejects receipts declaring unknown critical fields', async () => {
+    const payload = buildReceiptPayload({
+      issuer: FIXTURE_ORIGIN,
+      audience: FIXTURE_ORIGIN,
+      grantId: 'grt_1',
+      signatureBase: 'x',
+      decision: 'allowed',
+      auditId: 'aud_1',
+      now: NOW,
+    });
+    const token = await signReceipt(
+      { ...payload, critical: ['mystery_extension'] },
+      { privateJwk: site.privateJwk, kid: SITE_KID },
+    );
+    await expectCode(Codes.REQUEST_MALFORMED, () => verifyReceipt(token, DEPS));
+    await verifyReceipt(token, { ...DEPS, knownCriticalFields: ['mystery_extension'] });
   });
 });
