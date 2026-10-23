@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:error",
+  "title": "TrailGate error response",
+  "description": "Structured error envelope (spec/errors.md).",
+  "type": "object",
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^tg\\.[a-z0-9_]+(\\.[a-z0-9_]+)+$"
+        },
+        "message": { "type": "string" },
+        "detail": { "type": "object" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

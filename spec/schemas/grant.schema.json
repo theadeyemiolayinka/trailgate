@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:grant",
+  "title": "TrailGate grant payload",
+  "description": "The JWT claims of a grant (spec/protocol.md section 6). The wire form is a compact JWS; this schema validates the decoded payload.",
+  "type": "object",
+  "required": ["iss", "aud", "iat", "exp", "jti", "cnf", "tg"],
+  "properties": {
+    "iss": { "type": "string", "pattern": "^https://" },
+    "aud": { "type": "string", "pattern": "^https://" },
+    "iat": { "type": "integer" },
+    "exp": { "type": "integer" },
+    "jti": { "type": "string", "minLength": 1 },
+    "sub": { "type": "string" },
+    "cnf": {
+      "type": "object",
+      "required": ["jkt"],
+      "properties": {
+        "jkt": { "type": "string", "minLength": 43, "maxLength": 43 }
+      },
+      "additionalProperties": false
+    },
+    "tg": {
+      "type": "object",
+      "required": ["version", "permissions", "resources", "constraints", "request_id"],
+      "properties": {
+        "version": { "type": "string" },
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^tg\\.[a-z0-9_]+(\\.[a-z0-9_]+)+$" }
+        },
+        "resources": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "$ref": "urn:trailgate:schemas:constraint" }
+        },
+        "request_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "critical": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

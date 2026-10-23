@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:grant-request",
+  "title": "TrailGate grant request",
+  "description": "POST body for the grant_request endpoint (spec/protocol.md section 10.2).",
+  "type": "object",
+  "required": [
+    "version",
+    "permissions",
+    "resources",
+    "constraints",
+    "agent_key",
+    "code_challenge",
+    "code_challenge_method"
+  ],
+  "properties": {
+    "version": { "type": "string" },
+    "permissions": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^tg\\.[a-z0-9_]+(\\.[a-z0-9_]+)+$" }
+    },
+    "resources": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "constraints": {
+      "type": "array",
+      "items": { "$ref": "urn:trailgate:schemas:constraint" }
+    },
+    "agent_key": {
+      "type": "object",
+      "required": ["kty"],
+      "properties": {
+        "kty": { "type": "string", "enum": ["OKP", "EC"] },
+        "crv": { "type": "string", "enum": ["Ed25519", "P-256"] },
+        "x": { "type": "string" },
+        "y": { "type": "string" },
+        "kid": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "code_challenge": { "type": "string", "minLength": 43, "maxLength": 43 },
+    "code_challenge_method": { "type": "string", "const": "S256" },
+    "redirect_uri": { "type": "string", "pattern": "^https://" },
+    "state": { "type": "string", "maxLength": 1024 },
+    "requested_seconds": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}

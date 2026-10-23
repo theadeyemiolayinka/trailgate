@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:receipt",
+  "title": "TrailGate receipt payload",
+  "description": "The JWT claims of a receipt (spec/protocol.md section 14). The wire form is a compact JWS; this schema validates the decoded payload.",
+  "type": "object",
+  "required": ["iss", "aud", "jti", "iat", "tg"],
+  "properties": {
+    "iss": { "type": "string", "pattern": "^https://" },
+    "aud": { "type": "string", "pattern": "^https://" },
+    "jti": { "type": "string", "minLength": 1 },
+    "iat": { "type": "integer" },
+    "tg": {
+      "type": "object",
+      "required": ["grant_id", "request_digest", "decision", "audit_id"],
+      "properties": {
+        "grant_id": { "type": "string", "minLength": 1 },
+        "request_digest": { "type": "string", "minLength": 1 },
+        "decision": { "type": "string", "enum": ["allowed", "denied"] },
+        "code": { "type": "string", "pattern": "^tg\\.[a-z0-9_]+(\\.[a-z0-9_]+)+$" },
+        "amounts": {
+          "type": "object",
+          "properties": {
+            "reserved": { "$ref": "urn:trailgate:schemas:constraint#/$defs/money" },
+            "consumed": { "$ref": "urn:trailgate:schemas:constraint#/$defs/money" },
+            "released": { "$ref": "urn:trailgate:schemas:constraint#/$defs/money" }
+          },
+          "additionalProperties": false
+        },
+        "audit_id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "if": { "properties": { "decision": { "const": "denied" } } },
+      "then": { "required": ["code"] }
+    },
+    "critical": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

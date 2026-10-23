@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:audit-event",
+  "title": "TrailGate audit event",
+  "description": "A single audit log event (spec/protocol.md section 15). The event vocabulary is normative; transport and storage are site-defined.",
+  "type": "object",
+  "required": ["event", "at"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": [
+        "grant.requested",
+        "grant.consent_decided",
+        "grant.issued",
+        "grant.revoked",
+        "request.authenticated",
+        "request.denied",
+        "reservation.created",
+        "reservation.consumed",
+        "reservation.released",
+        "key.rotated"
+      ]
+    },
+    "at": { "type": "integer" },
+    "actor": { "type": "string" },
+    "request_id": { "type": "string" },
+    "grant_id": { "type": "string" },
+    "jkt": { "type": "string" },
+    "sub": { "type": "string" },
+    "decision": { "type": "string" },
+    "code": { "type": "string" },
+    "stage": { "type": "string" },
+    "reason": { "type": "string" },
+    "nonce": { "type": "string" },
+    "request_digest": { "type": "string" },
+    "reservation_id": { "type": "string" },
+    "amount": { "type": "integer" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "permissions": { "type": "array", "items": { "type": "string" } },
+    "constraints": { "type": "array" },
+    "old_jkt": { "type": "string" },
+    "new_jkt": { "type": "string" },
+    "exp": { "type": "integer" },
+    "detail": { "type": "object" }
+  },
+  "additionalProperties": false
+}

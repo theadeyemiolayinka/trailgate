@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": "tg.constraint.violated",
+    "message": "request amount exceeds the grant maximum",
+    "detail": {
+      "type": "max_amount",
+      "limit": { "amount": 5000, "currency": "USD" },
+      "requested": { "amount": 6500, "currency": "USD" }
+    }
+  }
+}

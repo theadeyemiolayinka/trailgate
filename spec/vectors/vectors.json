@@ -1,0 +1,447 @@
+{
+  "version": "0.1",
+  "description": "TrailGate draft 0.1 conformance vectors. kind=schema: validate doc against the named schema. kind=decision: expected enforcement outcome; exercised by the conformance suite, not by schema validation.",
+  "cases": [
+    {
+      "id": "discovery.valid",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:discovery",
+      "description": "Baseline valid discovery document.",
+      "doc": {
+        "version": "0.1",
+        "protocol_versions": ["0.1"],
+        "issuer": "https://shop.example.com",
+        "endpoints": {
+          "grant_request": "https://shop.example.com/tg/grant-request",
+          "grant_redemption": "https://shop.example.com/tg/redeem",
+          "grant_status": "https://shop.example.com/tg/status",
+          "grant_revocation": "https://shop.example.com/tg/revoke"
+        },
+        "signing_keys": {
+          "keys": [
+            {
+              "kty": "OKP",
+              "crv": "Ed25519",
+              "x": "11qYAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Yq0",
+              "kid": "vaj7h3k0u2y9f1e0z8x5c4v3b2n1m0a9s8d7f6g5h4j"
+            }
+          ]
+        },
+        "permissions": ["tg.cart.read", "tg.order.create", "tg.wallet.charge"],
+        "constraint_types": ["max_amount", "cumulative_budget"]
+      },
+      "valid": true
+    },
+    {
+      "id": "discovery.cross_origin_endpoint",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:discovery",
+      "description": "Schema accepts the shape, but the endpoint origin differs from the document origin: rejected by the origin rule in section 5.3 (checked by the conformance harness, not JSON Schema).",
+      "doc": {
+        "version": "0.1",
+        "protocol_versions": ["0.1"],
+        "issuer": "https://shop.example.com",
+        "endpoints": {
+          "grant_request": "https://evil.example.net/tg/grant-request",
+          "grant_redemption": "https://shop.example.com/tg/redeem",
+          "grant_status": "https://shop.example.com/tg/status",
+          "grant_revocation": "https://shop.example.com/tg/revoke"
+        },
+        "signing_keys": {
+          "keys": [
+            { "kty": "OKP", "crv": "Ed25519", "x": "11qYAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Yq0" }
+          ]
+        },
+        "permissions": ["tg.order.create"],
+        "constraint_types": []
+      },
+      "valid": true,
+      "post_checks": [{ "rule": "same_origin", "expect": "reject", "code": "tg.discovery.invalid" }]
+    },
+    {
+      "id": "discovery.missing_signing_keys",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:discovery",
+      "description": "Missing required signing_keys member.",
+      "doc": {
+        "version": "0.1",
+        "protocol_versions": ["0.1"],
+        "issuer": "https://shop.example.com",
+        "endpoints": {
+          "grant_request": "https://shop.example.com/tg/grant-request",
+          "grant_redemption": "https://shop.example.com/tg/redeem",
+          "grant_status": "https://shop.example.com/tg/status",
+          "grant_revocation": "https://shop.example.com/tg/revoke"
+        },
+        "permissions": [],
+        "constraint_types": []
+      },
+      "valid": false
+    },
+    {
+      "id": "discovery.bad_version",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:discovery",
+      "description": "Unsupported document version.",
+      "doc": {
+        "version": "9.9",
+        "protocol_versions": ["0.1"],
+        "issuer": "https://shop.example.com",
+        "endpoints": {
+          "grant_request": "https://shop.example.com/tg/grant-request",
+          "grant_redemption": "https://shop.example.com/tg/redeem",
+          "grant_status": "https://shop.example.com/tg/status",
+          "grant_revocation": "https://shop.example.com/tg/revoke"
+        },
+        "signing_keys": { "keys": [{ "kty": "OKP" }] },
+        "permissions": [],
+        "constraint_types": []
+      },
+      "valid": false
+    },
+    {
+      "id": "discovery.issuer_not_https",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:discovery",
+      "description": "Issuer without https scheme.",
+      "doc": {
+        "version": "0.1",
+        "protocol_versions": ["0.1"],
+        "issuer": "http://shop.example.com",
+        "endpoints": {
+          "grant_request": "https://shop.example.com/tg/grant-request",
+          "grant_redemption": "https://shop.example.com/tg/redeem",
+          "grant_status": "https://shop.example.com/tg/status",
+          "grant_revocation": "https://shop.example.com/tg/revoke"
+        },
+        "signing_keys": { "keys": [{ "kty": "OKP" }] },
+        "permissions": [],
+        "constraint_types": []
+      },
+      "valid": false
+    },
+    {
+      "id": "grant-request.valid",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:grant-request",
+      "description": "Baseline valid grant request.",
+      "doc": {
+        "version": "0.1",
+        "permissions": ["tg.order.create"],
+        "resources": ["cart:cart_01J8ZQW4"],
+        "constraints": [{ "type": "max_amount", "params": { "amount": 5000, "currency": "USD" } }],
+        "agent_key": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Yq9"
+        },
+        "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        "code_challenge_method": "S256"
+      },
+      "valid": true
+    },
+    {
+      "id": "grant-request.bad_permission_format",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:grant-request",
+      "description": "Permission identifier not matching tg.<domain>.<action>.",
+      "doc": {
+        "version": "0.1",
+        "permissions": ["admin"],
+        "resources": [],
+        "constraints": [],
+        "agent_key": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Yq9"
+        },
+        "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        "code_challenge_method": "S256"
+      },
+      "valid": false
+    },
+    {
+      "id": "grant-request.weak_challenge_method",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:grant-request",
+      "description": "Plain code_challenge_method is not allowed; S256 only.",
+      "doc": {
+        "version": "0.1",
+        "permissions": ["tg.order.create"],
+        "resources": [],
+        "constraints": [],
+        "agent_key": {
+          "kty": "OKP",
+          "crv": "Ed25519",
+          "x": "9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Yq9"
+        },
+        "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+        "code_challenge_method": "plain"
+      },
+      "valid": false
+    },
+    {
+      "id": "grant.valid",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:grant",
+      "description": "Baseline valid grant payload.",
+      "doc": {
+        "iss": "https://shop.example.com",
+        "aud": "https://shop.example.com",
+        "iat": 1761264000,
+        "exp": 1761271200,
+        "jti": "grt_01J8ZXQ2W8P4K6M8N0R2T4V6X8",
+        "cnf": { "jkt": "0c9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Y" },
+        "tg": {
+          "version": "0.1",
+          "permissions": ["tg.order.create", "tg.wallet.charge"],
+          "resources": ["cart:cart_01J8ZQW4"],
+          "constraints": [
+            { "type": "max_amount", "params": { "amount": 5000, "currency": "USD" } }
+          ],
+          "request_id": "req_01J8ZWA1B2C3D4E5F6G7H8J9K"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "grant.missing_cnf",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:grant",
+      "description": "Grant without key binding is invalid.",
+      "doc": {
+        "iss": "https://shop.example.com",
+        "aud": "https://shop.example.com",
+        "iat": 1761264000,
+        "exp": 1761271200,
+        "jti": "grt_01J8ZXQ2W8P4K6M8N0R2T4V6X8",
+        "tg": {
+          "version": "0.1",
+          "permissions": ["tg.order.create"],
+          "resources": [],
+          "constraints": [],
+          "request_id": "req_01J8ZWA1B2C3D4E5F6G7H8J9K"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "grant.unknown_field",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:grant",
+      "description": "Unknown field outside the critical mechanism is rejected by the closed schema. Note: extension fields would be added through a spec change.",
+      "doc": {
+        "iss": "https://shop.example.com",
+        "aud": "https://shop.example.com",
+        "iat": 1761264000,
+        "exp": 1761271200,
+        "jti": "grt_01J8ZXQ2W8P4K6M8N0R2T4V6X8",
+        "cnf": { "jkt": "0c9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Y" },
+        "tg": {
+          "version": "0.1",
+          "permissions": ["tg.order.create"],
+          "resources": [],
+          "constraints": [],
+          "request_id": "req_01J8ZWA1B2C3D4E5F6G7H8J9K"
+        },
+        "admin_override": true
+      },
+      "valid": false
+    },
+    {
+      "id": "constraint.max_amount.valid",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:constraint",
+      "description": "Valid max_amount constraint.",
+      "doc": { "type": "max_amount", "params": { "amount": 5000, "currency": "USD" } },
+      "valid": true
+    },
+    {
+      "id": "constraint.float_amount",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:constraint",
+      "description": "Floating-point amount is invalid; minor units are integers.",
+      "doc": { "type": "max_amount", "params": { "amount": 49.99, "currency": "USD" } },
+      "valid": false
+    },
+    {
+      "id": "constraint.rate_limit.missing_window",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:constraint",
+      "description": "rate_limit missing window_seconds.",
+      "doc": { "type": "rate_limit", "params": { "max_requests": 10 } },
+      "valid": false
+    },
+    {
+      "id": "constraint.unknown_type.structural",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:constraint",
+      "description": "Unknown constraint type parses (open structure) but fails closed at evaluation with tg.constraint.unknown_type.",
+      "doc": { "type": "geo_fence", "params": { "region": "eu" } },
+      "valid": true,
+      "post_checks": [
+        { "rule": "constraint_evaluation", "expect": "deny", "code": "tg.constraint.unknown_type" }
+      ]
+    },
+    {
+      "id": "receipt.allowed.valid",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:receipt",
+      "description": "Valid allowed receipt.",
+      "doc": {
+        "iss": "https://shop.example.com",
+        "aud": "https://shop.example.com",
+        "jti": "rcp_01J90AB1C2D3E4F5G6H7J8K9M0",
+        "iat": 1761264360,
+        "tg": {
+          "grant_id": "grt_01J8ZXQ2W8P4K6M8N0R2T4V6X8",
+          "request_digest": "y1i8kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Y",
+          "decision": "allowed",
+          "amounts": { "consumed": { "amount": 4250, "currency": "USD" } },
+          "audit_id": "evt_01J90AF2C3D4E5F6G7H8J9K9M1"
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "receipt.denied_missing_code",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:receipt",
+      "description": "Denied receipt must carry the error code.",
+      "doc": {
+        "iss": "https://shop.example.com",
+        "aud": "https://shop.example.com",
+        "jti": "rcp_01J90AB1C2D3E4F5G6H7J8K9M0",
+        "iat": 1761264360,
+        "tg": {
+          "grant_id": "grt_01J8ZXQ2W8P4K6M8N0R2T4V6X8",
+          "request_digest": "y1i8kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Y",
+          "decision": "denied",
+          "audit_id": "evt_01J90AF2C3D4E5F6G7H8J9K9M1"
+        }
+      },
+      "valid": false
+    },
+    {
+      "id": "error.valid",
+      "kind": "schema",
+      "schema": "urn:trailgate:schemas:error",
+      "description": "Valid error envelope.",
+      "doc": {
+        "error": {
+          "code": "tg.request.replay_detected",
+          "message": "nonce already seen for this grant",
+          "detail": { "nonce": "n_01J90AZ1B2C3D4E5F6G7H8J9K0" }
+        }
+      },
+      "valid": true
+    },
+    {
+      "id": "decision.grant_expired",
+      "kind": "decision",
+      "description": "Grant exp is in the past at enforcement time.",
+      "given": { "grant": { "exp": 1761264000 }, "now": 1761264001 },
+      "expect": { "decision": "deny", "code": "tg.grant.expired", "stage": 5 }
+    },
+    {
+      "id": "decision.audience_mismatch",
+      "kind": "decision",
+      "description": "Grant presented to a site other than its aud.",
+      "given": {
+        "grant": { "aud": "https://other.example.com" },
+        "site": "https://shop.example.com"
+      },
+      "expect": { "decision": "deny", "code": "tg.request.audience_mismatch", "stage": 5 }
+    },
+    {
+      "id": "decision.revoked_grant",
+      "kind": "decision",
+      "description": "Grant jti present in the revocation set.",
+      "given": { "grant": { "jti": "grt_revoked1" }, "revocation_state": { "grt_revoked1": true } },
+      "expect": { "decision": "deny", "code": "tg.grant.revoked", "stage": 6 }
+    },
+    {
+      "id": "decision.key_mismatch",
+      "kind": "decision",
+      "description": "Signature keyid does not equal the grant cnf.jkt.",
+      "given": { "keyid": "keythumbprint_A", "cnf": { "jkt": "keythumbprint_B" } },
+      "expect": { "decision": "deny", "code": "tg.request.key_mismatch", "stage": 7 }
+    },
+    {
+      "id": "decision.malformed_proof",
+      "kind": "decision",
+      "description": "Request missing required signature headers.",
+      "given": {
+        "headers": ["trailgate-grant"],
+        "required": ["trailgate-grant", "Signature-Input", "Signature", "Content-Digest"]
+      },
+      "expect": { "decision": "deny", "code": "tg.request.malformed", "stage": 1 }
+    },
+    {
+      "id": "decision.replay",
+      "kind": "decision",
+      "description": "Nonce already recorded for this grant within the window.",
+      "given": { "jti": "grt_1", "nonce": "n_dup", "seen": ["n_dup"] },
+      "expect": { "decision": "deny", "code": "tg.request.replay_detected", "stage": 8 }
+    },
+    {
+      "id": "decision.unknown_permission",
+      "kind": "decision",
+      "description": "Grant request asks for a permission the site does not advertise.",
+      "given": { "requested": ["tg.admin.delete"], "advertised": ["tg.order.create"] },
+      "expect": { "decision": "deny", "code": "tg.grant.unknown_permission" }
+    },
+    {
+      "id": "decision.excessive_spend",
+      "kind": "decision",
+      "description": "Request amount exceeds max_amount.",
+      "given": {
+        "constraint": { "type": "max_amount", "params": { "amount": 5000, "currency": "USD" } },
+        "request_amount": { "amount": 6500, "currency": "USD" }
+      },
+      "expect": { "decision": "deny", "code": "tg.constraint.violated", "stage": 12 }
+    },
+    {
+      "id": "decision.budget_exhausted",
+      "kind": "decision",
+      "description": "Reservation would exceed cumulative_budget headroom.",
+      "given": {
+        "constraint": {
+          "type": "cumulative_budget",
+          "params": { "amount": 20000, "currency": "USD" }
+        },
+        "consumed": 18000,
+        "requested": { "amount": 5000, "currency": "USD" }
+      },
+      "expect": { "decision": "deny", "code": "tg.constraint.violated", "stage": 12 }
+    },
+    {
+      "id": "decision.unknown_constraint_type",
+      "kind": "decision",
+      "description": "Grant contains a constraint type the site cannot evaluate; fail closed.",
+      "given": { "constraint": { "type": "geo_fence", "params": {} } },
+      "expect": { "decision": "deny", "code": "tg.constraint.unknown_type", "stage": 12 }
+    },
+    {
+      "id": "decision.idempotency_conflict",
+      "kind": "decision",
+      "description": "Same Idempotency-Key, different body digest.",
+      "given": { "key": "idem_1", "stored_digest": "sha256:aaa", "request_digest": "sha256:bbb" },
+      "expect": { "decision": "deny", "code": "tg.request.idempotency_conflict", "stage": 9 }
+    },
+    {
+      "id": "decision.cross_user_resource",
+      "kind": "decision",
+      "description": "Selector matches another user's resource; ownership check fails.",
+      "given": { "selector": "order:ord_other_user", "owner": "usr_B", "sub": "usr_A" },
+      "expect": { "decision": "deny", "code": "tg.request.resource_denied", "stage": 11 }
+    },
+    {
+      "id": "decision.site_rules_deny",
+      "kind": "decision",
+      "description": "Grant checks pass but site business logic denies.",
+      "given": { "site_rule_result": "deny" },
+      "expect": { "decision": "deny", "code": "tg.authorization.denied", "stage": 13 }
+    }
+  ]
+}

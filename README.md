@@ -8,7 +8,7 @@ A website that implements TrailGate exposes a standard way for an agent to disco
 
 Experimental. TrailGate is not a proven security standard, the specification is not finalized, and nothing in this repository should be used in production or with real funds.
 
-The repository currently contains the development foundation only: workspace structure, tooling, governance documents, and package scaffolds. Protocol behavior is not implemented yet.
+The repository currently contains the development foundation plus the draft 0.1 protocol contract in `spec/` (normative document, JSON Schemas, error registry, examples, and conformance vectors). Protocol behavior is not implemented in the SDKs yet.
 
 ## Repository layout
 
@@ -60,6 +60,9 @@ pnpm verify
 - `docs/architecture.md`: components and trust boundaries.
 - `docs/threat-model.md`: assets, attackers, surfaces, mitigations, open risks.
 - `docs/decisions/`: architecture decision records.
+- `docs/research/protocol-references.md`: standards research behind the contract.
+- `docs/handoff.md`: which schema and interface each owner implements next.
+- `spec/protocol.md`: the normative draft 0.1 contract.
 
 ## License
 

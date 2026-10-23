@@ -1,0 +1,30 @@
+{
+  "version": "0.1",
+  "protocol_versions": ["0.1"],
+  "issuer": "https://shop.example.com",
+  "endpoints": {
+    "grant_request": "https://shop.example.com/trailgate/grant-request",
+    "grant_redemption": "https://shop.example.com/trailgate/redeem",
+    "grant_status": "https://shop.example.com/trailgate/status",
+    "grant_revocation": "https://shop.example.com/trailgate/revoke"
+  },
+  "signing_keys": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "11qYAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Yq0",
+        "kid": "vaj7h3k0u2y9f1e0z8x5c4v3b2n1m0a9s8d7f6g5h4j",
+        "alg": "Ed25519",
+        "use": "sig"
+      }
+    ]
+  },
+  "permissions": ["tg.cart.read", "tg.cart.write", "tg.order.create", "tg.wallet.charge"],
+  "constraint_types": ["max_amount", "cumulative_budget", "rate_limit", "valid_window"],
+  "capabilities": {
+    "supports_redirect": true,
+    "supports_receipts_unsigned": false,
+    "max_grant_seconds": 86400
+  }
+}

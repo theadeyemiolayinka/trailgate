@@ -8,3 +8,8 @@ A contract-changing decision follows the process in ADR 0002.
 | --- | --- | --- |
 | 0001 | Monorepo layout and tooling | accepted |
 | 0002 | Protocol decision and versioning process | accepted |
+| 0003 | Request proof mechanism: HTTP Message Signatures | accepted |
+| 0004 | Grant representation and key binding | accepted |
+| 0005 | Discovery location and endpoint origin rules | accepted |
+| 0006 | Constraint model and spending semantics | accepted |
+| 0007 | Consent flow shape | accepted |

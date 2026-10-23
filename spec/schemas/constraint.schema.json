@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:constraint",
+  "title": "TrailGate constraint",
+  "description": "A typed constraint object. Registered types have defined params; unknown types validate structurally but fail closed at evaluation (spec/protocol.md section 9).",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": { "type": "string", "minLength": 1 },
+    "params": { "type": "object" }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "enum": ["max_amount", "cumulative_budget"] } } },
+      "then": {
+        "properties": { "params": { "$ref": "#/$defs/money" } },
+        "required": ["params"]
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "rate_limit" } } },
+      "then": {
+        "properties": {
+          "params": {
+            "type": "object",
+            "required": ["max_requests", "window_seconds"],
+            "properties": {
+              "max_requests": { "type": "integer", "minimum": 1 },
+              "window_seconds": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["params"]
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "valid_window" } } },
+      "then": {
+        "properties": {
+          "params": {
+            "type": "object",
+            "required": ["not_before", "not_after"],
+            "properties": {
+              "not_before": { "type": "integer" },
+              "not_after": { "type": "integer" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["params"]
+      }
+    }
+  ],
+  "$defs": {
+    "money": {
+      "type": "object",
+      "required": ["amount", "currency"],
+      "properties": {
+        "amount": { "type": "integer", "minimum": 0 },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO 4217 currency code"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

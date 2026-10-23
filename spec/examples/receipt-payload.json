@@ -1,0 +1,15 @@
+{
+  "iss": "https://shop.example.com",
+  "aud": "https://shop.example.com",
+  "jti": "rcp_01J90AB1C2D3E4F5G6H7J8K9M0",
+  "iat": 1761264360,
+  "tg": {
+    "grant_id": "grt_01J8ZXQ2W8P4K6M8N0R2T4V6X8",
+    "request_digest": "y1i8kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Y",
+    "decision": "allowed",
+    "amounts": {
+      "consumed": { "amount": 4250, "currency": "USD" }
+    },
+    "audit_id": "evt_01J90AF2C3D4E5F6G7H8J9K9M1"
+  }
+}

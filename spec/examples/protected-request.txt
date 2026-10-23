@@ -1,0 +1,18 @@
+Illustrative protected request (values are placeholders, not real signatures):
+
+POST /trailgate/charge HTTP/1.1
+Host: shop.example.com
+Content-Type: application/json
+Content-Digest: sha-256=:X48E9qOokRrv9Kk0y3L1b2N3c4D5e6F7g8H9i0J1k2Q=:
+Idempotency-Key: idem_01J90B1C2D3E4F5G6H7J8K9M01
+trailgate-grant: eyJhbGciOiJFZDI1NTE5IiwidHlwIjoidHJhaWxnYXRlLWdyYW50K2p3dCIsImtpZCI6InZhaiJ9.eyJpc3MiOiJodHRwczovL3Nob3AuZXhhbXBsZS5jb20ifQ.signature
+Signature-Input: tg=("@method" "@authority" "@path" "@query" "content-digest" "trailgate-grant" "idempotency-key");created=1761264300;expires=1761264360;nonce="n_01J90AZ1B2C3D4E5F6G7H8J9K0";keyid="0c9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Y";alg="ed25519";tag="trailgate"
+Signature: tg=:MEUCIQDy5UH8...example...:
+
+{"amount": {"amount": 4250, "currency": "USD"}, "order": "ord_9F2KQ7"}
+
+Notes:
+- "idempotency-key" is covered by the signature and dedupes logical operations.
+- "content-digest" binds the exact body bytes (RFC 9530, sha-256).
+- The covered component list and parameters are REQUIRED (spec/protocol.md section 11.2).
+- expires - created is 60 seconds, within the 300 second maximum.

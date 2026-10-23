@@ -1,0 +1,22 @@
+{
+  "iss": "https://shop.example.com",
+  "aud": "https://shop.example.com",
+  "iat": 1761264000,
+  "exp": 1761271200,
+  "jti": "grt_01J8ZXQ2W8P4K6M8N0R2T4V6X8",
+  "sub": "usr_ctx_01J8ZY0A2B3C4D5E6F7G8H9J",
+  "cnf": {
+    "jkt": "0c9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Y"
+  },
+  "tg": {
+    "version": "0.1",
+    "permissions": ["tg.order.create", "tg.wallet.charge"],
+    "resources": ["cart:cart_01J8ZQW4", "order:ord_9F2KQ7"],
+    "constraints": [
+      { "type": "max_amount", "params": { "amount": 5000, "currency": "USD" } },
+      { "type": "cumulative_budget", "params": { "amount": 20000, "currency": "USD" } },
+      { "type": "rate_limit", "params": { "max_requests": 60, "window_seconds": 3600 } }
+    ],
+    "request_id": "req_01J8ZWA1B2C3D4E5F6G7H8J9K"
+  }
+}

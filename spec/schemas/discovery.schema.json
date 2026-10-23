@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:discovery",
+  "title": "TrailGate discovery document",
+  "description": "Served at GET /.well-known/trailgate. Every URL must share the document origin (spec/protocol.md section 5.3).",
+  "type": "object",
+  "required": [
+    "version",
+    "protocol_versions",
+    "issuer",
+    "endpoints",
+    "signing_keys",
+    "permissions",
+    "constraint_types"
+  ],
+  "properties": {
+    "version": { "type": "string", "enum": ["0.1"] },
+    "protocol_versions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "issuer": { "type": "string", "pattern": "^https://" },
+    "endpoints": {
+      "type": "object",
+      "required": ["grant_request", "grant_redemption", "grant_status", "grant_revocation"],
+      "properties": {
+        "grant_request": { "type": "string", "pattern": "^https://" },
+        "grant_redemption": { "type": "string", "pattern": "^https://" },
+        "grant_status": { "type": "string", "pattern": "^https://" },
+        "grant_revocation": { "type": "string", "pattern": "^https://" }
+      },
+      "additionalProperties": false
+    },
+    "signing_keys": {
+      "type": "object",
+      "required": ["keys"],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jwk" },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "permissions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/permission" }
+    },
+    "constraint_types": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "supports_redirect": { "type": "boolean" },
+        "supports_receipts_unsigned": { "type": "boolean" },
+        "max_grant_seconds": { "type": "integer", "minimum": 1 },
+        "rate_limits": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "critical": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Field names that must be understood; unknown members cause rejection (spec/protocol.md section 4)."
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "permission": {
+      "type": "string",
+      "pattern": "^tg\\.[a-z0-9_]+(\\.[a-z0-9_]+)+$"
+    },
+    "jwk": {
+      "type": "object",
+      "required": ["kty"],
+      "properties": {
+        "kty": { "type": "string" },
+        "use": { "type": "string" },
+        "key_ops": { "type": "array", "items": { "type": "string" } },
+        "alg": { "type": "string" },
+        "kid": { "type": "string" },
+        "crv": { "type": "string" },
+        "x": { "type": "string" },
+        "y": { "type": "string" },
+        "n": { "type": "string" },
+        "e": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

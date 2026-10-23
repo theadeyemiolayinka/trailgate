@@ -1,0 +1,20 @@
+{
+  "version": "0.1",
+  "permissions": ["tg.order.create", "tg.wallet.charge"],
+  "resources": ["cart:cart_01J8ZQW4", "order:ord_9F2KQ7"],
+  "constraints": [
+    { "type": "max_amount", "params": { "amount": 5000, "currency": "USD" } },
+    { "type": "cumulative_budget", "params": { "amount": 20000, "currency": "USD" } },
+    { "type": "rate_limit", "params": { "max_requests": 60, "window_seconds": 3600 } }
+  ],
+  "agent_key": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "9kYQAYdkxL6f1VjT0w5r8K5h0Yq0b3Yq3b5Yq0b3Yq9"
+  },
+  "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+  "code_challenge_method": "S256",
+  "redirect_uri": "https://agent.example.net/trailgate/callback",
+  "state": "af0ifjsldkj",
+  "requested_seconds": 7200
+}
