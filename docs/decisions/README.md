@@ -13,3 +13,4 @@ A contract-changing decision follows the process in ADR 0002.
 | 0005 | Discovery location and endpoint origin rules | accepted |
 | 0006 | Constraint model and spending semantics | accepted |
 | 0007 | Consent flow shape | accepted |
+| 0008 | Draft 0.1 errata: algorithm identifiers and Idempotency-Key | accepted |

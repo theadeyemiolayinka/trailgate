@@ -41,7 +41,7 @@ Trust boundaries (authoritative list):
 - Identifiers: opaque strings with at least 128 bits of entropy. UUIDv7 or base64url-encoded random values are RECOMMENDED. Identifiers carry no personal information.
 - Money: integer minor units plus an ISO 4217 currency code, represented as `{ "amount": <integer>, "currency": "XXX" }`. Floating-point values MUST NOT appear in authoritative contexts.
 - Key representation: JWK (RFC 7517). Public keys only appear in protocol messages. A key is identified by its SHA-256 JWK thumbprint (RFC 7638), base64url-encoded, written `jkt`.
-- Signature algorithm: `ed25519` (RFC 9421 algorithm registry) is REQUIRED to implement for grant, receipt, and request signatures. `ecdsa-p256-sha256` is OPTIONAL. Any other algorithm MUST be rejected unless a future spec version registers it.
+- Signature algorithms: Ed25519 signing is REQUIRED to implement; ECDSA P-256 with SHA-256 is OPTIONAL. Two registries apply and their names MUST NOT be interchanged: JWS `alg` values for grants and receipts are JOSE names `EdDSA` and `ES256`; RFC 9421 `alg` signature parameters for request signatures are `ed25519` and `ecdsa-p256-sha256`. Any other algorithm MUST be rejected unless a future spec version registers it.
 - Error handling: failures produce structured error responses per `spec/errors.md`. Codes are stable strings of the form `tg.<domain>.<name>`.
 
 ## 4. Versioning
@@ -97,7 +97,7 @@ Agents MUST validate the document against the schema before use, treat it as unt
 
 ### 6.1 Representation
 
-A grant is a compact JWS (JWT, RFC 7515/7519) signed by a site key present in `signing_keys` or reachable from it (key rotation per section 13.4). The protected header MUST contain `alg` (`ed25519` or `ecdsa-p256-sha256`), `typ: "trailgate-grant+jwt"`, and `kid` equal to the signing key's `jkt`.
+A grant is a compact JWS (JWT, RFC 7515/7519) signed by a site key present in `signing_keys` or reachable from it (key rotation per section 13.4). The protected header MUST contain `alg` (a JOSE name: `EdDSA` or `ES256`), `typ: "trailgate-grant+jwt"`, and `kid` equal to the signing key's `jkt`. Receipts use `typ: "trailgate-receipt+jwt"` with the same JOSE `alg` rules.
 
 ### 6.2 Claims
 
@@ -216,7 +216,7 @@ Every protected request carries:
 | `Signature-Input` | header | RFC 9421 signature parameters; one signature labeled `tg`. |
 | `Signature` | header | The signature value for label `tg`. |
 | `Content-Digest` | header | RFC 9530, `sha-256` digest of the exact message content. REQUIRED even for empty bodies (digest of zero bytes). |
-| `Idempotency-Key` | header | Unique per logical operation (draft-ietf-httpapi-idempotency-key-header-08 semantics). REQUIRED for non-idempotent methods. |
+| `Idempotency-Key` | header | Unique per logical operation (draft-ietf-httpapi-idempotency-key-header-08 semantics). REQUIRED on every request because the signature profile always covers it. |
 
 ### 11.2 Signature profile
 
@@ -245,7 +245,7 @@ The site MUST perform these checks in order and stop at the first failure:
 6. Revocation and lifecycle state → `tg.grant.revoked`.
 7. Key binding: `keyid` equals `cnf.jkt` and the signature verifies under the resolved key → `tg.request.signature_invalid` or `tg.request.key_mismatch`.
 8. Replay: `nonce` not seen within the window for this grant → `tg.request.replay_detected`.
-9. Idempotency: a prior request with the same `Idempotency-Key` and grant returns the stored outcome instead of re-executing → `tg.request.idempotency_conflict` if the same key was used with a different body.
+9. Idempotency: a prior request with the same `Idempotency-Key` and grant returns the stored outcome instead of re-executing → `tg.request.idempotency_conflict` if the same key was used with a different operation. The stored comparison digest covers the operation (method, target URI, content digest, grant), not the signature base, because a retried signature has a fresh nonce.
 10. Permission: the request's action is covered by `tg.permissions` → `tg.request.permission_denied`.
 11. Resource: every touched resource selector is listed and owned by the grant's user context → `tg.request.resource_denied`.
 12. Constraints: all `tg.constraints` pass against authoritative state → `tg.constraint.violated` (with the failing constraint in `detail`).
@@ -256,8 +256,8 @@ Any required check the site cannot perform (signature verification infrastructur
 ### 11.4 Replay and idempotency semantics
 
 - The site caches `(jti, nonce)` pairs for the maximum signature window plus tolerance. A repeat nonce is replay and denied.
-- `Idempotency-Key` dedupes logical operations, not transport retries only: a second request with the same key and identical body digest returns the stored response without re-executing; the same key with a different digest is `tg.request.idempotency_conflict`.
-- GET requests are not expected to carry `Idempotency-Key`; mutating endpoints MUST require it.
+- `Idempotency-Key` dedupes logical operations, not transport retries only: a second request with the same key and an identical operation digest (method, target URI, `Content-Digest` value, grant `jti`) returns the stored response without re-executing; the same key with a different operation digest is `tg.request.idempotency_conflict`.
+- Every request carries `Idempotency-Key` (it is a fixed covered component). Non-mutating requests may reuse a key freely since no dedupe record is stored for them unless the endpoint creates one; mutating endpoints MUST store and consult dedupe records.
 
 ## 12. Spending semantics
 

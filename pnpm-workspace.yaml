@@ -5,4 +5,5 @@ packages:
 catalog:
   "@types/node": "22.20.5"
   ajv: "8.20.0"
+  jose: "6.2.13"
   typescript: "7.0.2"

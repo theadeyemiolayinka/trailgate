@@ -17,6 +17,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test \"src/**/*.test.ts\""
   },
+  "dependencies": {
+    "jose": "catalog:"
+  },
   "devDependencies": {
     "@types/node": "catalog:",
     "ajv": "catalog:",

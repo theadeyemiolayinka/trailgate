@@ -16,24 +16,24 @@ The interoperable contract for this phase is `spec/protocol.md` plus the JSON Sc
 
 ## D1: Server SDK (`packages/server/`)
 
-Build these surfaces against the contract, nothing else:
+`packages/core` now implements the normative pipeline; the server SDK should compose it rather than reimplement it:
 
-- Endpoints named in `spec/schemas/discovery.schema.json` `endpoints`: `grant_request`, `grant_redemption`, `grant_status`, `grant_revocation`. Request body: `grant-request.schema.json`. Consent and redemption semantics: `spec/protocol.md` sections 10.2 to 10.5.
-- Protected-request verification pipeline: `spec/protocol.md` section 11.3 is the ordered checklist. Implement it in order; every stage maps to a registered error code in `spec/errors.md`.
-- Constraint evaluation: `spec/protocol.md` section 9 and `constraint.schema.json`. Evaluation is conjunctive and fail-closed; unknown `type` denies.
-- Spending ledger: `spec/protocol.md` section 12. Reservation insert plus headroom check must be one atomic operation. Money shape: `constraint.schema.json` `$defs/money`.
-- Receipts: `spec/protocol.md` section 14, `receipt.schema.json`. Sign with the site key; issue receipts for denials too.
-- Audit events: `spec/protocol.md` section 15, `audit-event.schema.json`.
+- `verifyProtectedRequest(req, deps)` is the section 11.3 checklist. Implement the port interfaces in `packages/core/src/ports.ts` over your real stores: `NonceStore` (atomic claim), `RevocationChecker`, `Ledger`, `RateLimiter`, `ResourceOwnerResolver`, `IdempotencyStore`, `SitePolicy`. The SDK's job is wiring, storage, and HTTP plumbing, not re-verification.
+- Endpoints named in `spec/schemas/discovery.schema.json` `endpoints`: `grant_request`, `grant_redemption`, `grant_status`, `grant_revocation`. Request body: `grant-request.schema.json`. Consent and redemption semantics: `spec/protocol.md` sections 10.2 to 10.5. These are not in core; they are server flows.
+- Spending ledger: `spec/protocol.md` section 12. Reservation insert plus headroom check must be one atomic operation in the `Ledger` implementation. Money shape: `constraint.schema.json` `$defs/money`.
+- Receipts: `buildReceiptPayload` + `signReceipt` in core; issue receipts for denials too (`spec/protocol.md` section 14).
+- Audit events: `spec/protocol.md` section 15, `audit-event.schema.json`, `AuditEvent` type in core.
 - Decision vectors to satisfy: `spec/vectors/vectors.json` entries with `kind: "decision"` and every `stage` number in section 11.3.
 
 ## D2: Agent SDK (`packages/agent/`), CLI, MCP adapter
 
-- Discovery: fetch `GET /.well-known/trailgate` (HTTPS, no redirects), validate against `discovery.schema.json`, enforce the same-origin rule (`spec/protocol.md` section 5.3), honor `critical` fields (section 4).
-- Consent initiation: build grant requests per `grant-request.schema.json`; S256 challenge generation per section 10.2; handle redirect (`redirect_uri`, `state`) and polling (`grant_status`) modes.
-- Request signing: RFC 9421 profile in `spec/protocol.md` section 11.2. Required covered components, parameters, window, and nonce rules are normative there. `Idempotency-Key` semantics per the cited draft.
-- Key management: generate Ed25519 keys (P-256 optional), compute `jkt` thumbprints (RFC 7638), keep private keys out of model context and out of logs.
-- Receipt verification: `spec/protocol.md` section 14.3. Treat failed verification as untrusted, not fatal.
-- Error handling: parse the `error.schema.json` envelope; branch on `code`, never on `message`.
+- Discovery: fetch `GET /.well-known/trailgate` (HTTPS, no redirects), then validate with `validateDiscoveryDocument` / `parseDiscoveryDocument` from core (same-origin rule per `spec/protocol.md` section 5.3, `critical` per section 4, version negotiation via `negotiateProtocolVersion`).
+- Consent initiation: build grant requests per `grant-request.schema.json` (`GrantRequestBody` type in core); S256 challenge generation per section 10.2; handle redirect (`redirect_uri`, `state`) and polling (`grant_status`) modes.
+- Request signing: `signRequest(req, options)` in core produces the section 11.2 profile (fixed covered components, `tag: "trailgate"`, `Content-Digest`, `Idempotency-Key`). The SDK adds transport and UX.
+- Key management: `generateEd25519KeyPair` / `generateP256KeyPair` in `packages/test-fixtures` for tests; production key generation and storage are the SDK's own concern. `jkt` via `jwkThumbprint` in core. Keep private keys out of model context and out of logs.
+- Receipt verification: `verifyReceipt(token, deps)` in core (`spec/protocol.md` section 14.3). Treat failed verification as untrusted, not fatal.
+- Error handling: parse the `error.schema.json` envelope; branch on `code`, never on `message`. `Codes` in core mirrors `spec/errors.md`.
+- Shared fixtures: `packages/test-fixtures` exports key generation, JWS signing (`signCompactJws`), and object factories (`makeDiscovery`, `makeGrantPayload`, `makeGrantRequest`, `makeConstraint`, `makeMoney`) usable without ExampleShop.
 
 ## D3: ExampleShop (`apps/example-shop/`)
 
