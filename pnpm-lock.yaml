@@ -36,7 +36,17 @@ importers:
   apps/example-shop: {}
 
   packages/agent:
+    dependencies:
+      '@trailgate/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
+      '@trailgate/server':
+        specifier: workspace:*
+        version: link:../server
+      '@trailgate/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.5
@@ -45,7 +55,17 @@ importers:
         version: 7.0.2
 
   packages/agent-cli:
+    dependencies:
+      '@trailgate/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@trailgate/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
+      '@trailgate/test-fixtures':
+        specifier: workspace:*
+        version: link:../test-fixtures
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.5
@@ -82,6 +102,13 @@ importers:
         version: 7.0.2
 
   packages/mcp-adapter:
+    dependencies:
+      '@trailgate/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@trailgate/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

@@ -6,6 +6,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "trailgate": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -17,7 +20,12 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test \"src/**/*.test.ts\""
   },
+  "dependencies": {
+    "@trailgate/agent": "workspace:*",
+    "@trailgate/core": "workspace:*"
+  },
   "devDependencies": {
+    "@trailgate/test-fixtures": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }
