@@ -101,6 +101,30 @@ Denials return the spec error envelope
 (`{ "error": { "code", "message", "detail?" } }`) with the registry's advisory
 HTTP status.
 
+## Configuration reference
+
+| Option | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `issuer` | yes | | Bare https origin; also `aud` for grants and receipts. |
+| `signingKeys` | yes | | One or more private JWKs (`Ed25519` or `P-256`). First key signs; all are published and verify. Rotate with `rotateSigningKey`. |
+| `permissions` | yes | | `tg.<domain>.<action>` identifiers the site honors; advertised verbatim. |
+| `constraintTypes` | | all registered | Constraint types the site evaluates. |
+| `paths` | | `/tg/*` | Endpoint paths for the four protocol endpoints plus `consent`. |
+| `capabilities` | | `{}` | Discovery capabilities; `max_grant_seconds` also set from `maxGrantSeconds`. |
+| `stores` | | in-memory | See "Stores". |
+| `subjectFor` | | identity | Maps host user id to grant `sub`. |
+| `policy` | | none | Stage-13 site authorization callback. |
+| `resourceOwners` | | none | `ownerOf(selector)` for cross-user isolation. Required for resource-scoped routes. |
+| `resourcePolicy` | | accept all | Intake-time selector namespace check. |
+| `refineScope` | | pass-through | Narrows requested scope; SDK enforces subset rules. |
+| `revocationAuthorizer` | | deny all | Authorizes `handleRevocation` calls (provisional). |
+| `clock` | | system | Injectable for tests. |
+| `toleranceSeconds` | | 60 | Max 120 (spec cap). |
+| `grantRequestTtlSeconds` | | 900 | Max 900 (spec cap). |
+| `defaultGrantSeconds` | | 3600 | Grant lifetime when the agent does not request one. |
+| `maxGrantSeconds` | | none | Ceiling on grant lifetime; advertised when set. |
+| `reservationTtlSeconds` | | 300 | Reservation auto-release TTL. |
+
 ## Stores
 
 All stores default to in-memory implementations suitable for development and
@@ -121,6 +145,49 @@ single-process demos only. For deployment, implement the ports in
 Fail closed: when a security-critical store cannot be consulted, the pipeline
 denies with `tg.internal.unavailable`.
 
+### Storage requirements
+
+Suggested schema per store. Times are integer unix seconds.
+
+- `grant_requests`: `request_id` PK, `created_at`, `expires_at`, `status`,
+  serialized `body` (JSON), `agent_jkt`, `subject`, `decided_at`,
+  `grant_id`, effective scope fields. Unique index on `request_id`.
+  `transition` is `UPDATE ... WHERE request_id=? AND status=?`.
+- `issued_grants`: `jti` PK, `issued_at`, `expires_at`, `agent_jkt`,
+  `subject`, `request_id`, `status`, revocation fields.
+- `agent_keys`: `jkt` PK, `jwk` (JSON).
+- `nonces`: composite PK `(grant_id, nonce)`, `expires_at`; claim is insert
+  or fail on conflict, plus expiry sweep.
+- `idempotency`: composite PK `(grant_id, key)`, `request_digest`, serialized
+  `outcome`.
+- `ledger`: consumed entries `(grant_id, amount, currency, at)` and
+  reservations `(reservation_id, grant_id, amount, state, expires_at)`;
+  `reserve` must run the headroom check and insert in one transaction.
+- `rate_hits`: `(grant_id, at)` appended per authenticated request;
+  `countInWindow` is a range count.
+- `audit`: append-only `(id, event)` rows; never updated or deleted.
+
+## Framework integration notes
+
+The SDK has no framework dependency. A host adapts its request type into
+`HostRequest` and sends back `HostResponse`. A working `node:http` adapter
+exists in `src/host.test.ts` and demonstrates a complete lifecycle over real
+HTTP; it is the only adapter exercised by the test suite.
+
+Adapter rules that must hold on every framework:
+
+- `url` must be the absolute request URI exactly as received, including raw
+  query. The signature covers `@authority`, `@path`, and `@query`; a
+  normalized or reconstructed URI breaks verification.
+- `headers` must contain lowercased names and the raw field values.
+- `body` must be the exact received bytes; `Content-Digest` verification
+  fails on re-encoded bodies.
+- Responses carry `content-type: application/json` and, on protected routes,
+  the `trailgate-receipt` header (provisional channel).
+
+TLS termination upstream is fine as long as the `url` seen by the SDK still
+matches the URI the agent signed (scheme and authority included).
+
 ## Provisional surfaces
 
 Pending D0 decisions; do not treat as normative.
@@ -138,9 +205,6 @@ Pending D0 decisions; do not treat as normative.
 
 ## Not yet implemented
 
-- Site signing key rotation flow (`key.rotated` events and multi-key
-  verification for outstanding grants are not wired; configuring multiple
-  `signingKeys` publishes them but only the first signs).
 - Idempotency pending-state records for in-flight duplicate suppression
   (a lookup-then-record window remains; production stores must enforce
   uniqueness).

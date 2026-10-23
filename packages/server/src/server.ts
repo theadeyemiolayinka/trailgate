@@ -13,6 +13,8 @@ import {
   revokeGrant,
   submitGrantRequest,
 } from './lifecycle.ts';
+import type { SiteSigningKey, SiteSigningKeyInput } from './signing.ts';
+import { siteSigningKey } from './signing.ts';
 import type {
   ConsentDecision,
   ConsentOutcome,
@@ -58,6 +60,13 @@ export interface TrailGateServer {
   handleRevocation(req: HostRequest): Promise<HostResponse>;
   /** Host-initiated revocation from authenticated site surfaces (spec section 13). */
   revokeGrant(jti: string, input: { reason: string; actor: string }): Promise<void>;
+  /**
+   * Rotates the site signing key (spec section 13.4). The new key becomes the
+   * signing key and is published first in `signing_keys`; retired keys remain
+   * configured so outstanding grants still verify until they expire. Emits a
+   * `key.rotated` audit event.
+   */
+  rotateSigningKey(input: SiteSigningKeyInput): Promise<SiteSigningKey>;
   /**
    * Enforces the spec section 11 pipeline around a host handler. The returned
    * function yields complete `HostResponse`s (denials and receipts included)
@@ -117,7 +126,12 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
           query.grant_id = grantId;
         }
         const status: GrantStatusResponse = await grantStatus(query, config);
-        return json(200, status);
+        const response = json(200, status);
+        response.headers = {
+          ...response.headers,
+          'cache-control': 'max-age=60', // spec section 13: at most 60s staleness
+        };
+        return response;
       } catch (err) {
         return errorResponse(err);
       }
@@ -125,6 +139,19 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
     handleRevocation: (req) =>
       handleRevocationRequest(req, config).catch((err) => errorResponse(err)),
     revokeGrant: (jti, input) => revokeGrant(jti, input, config),
+    rotateSigningKey: async (input) => {
+      const previous = config.signingKey;
+      const next = siteSigningKey(input);
+      config.signingKeys.unshift(next);
+      config.signingKey = next;
+      await config.stores.audit.record({
+        event: 'key.rotated',
+        at: config.clock.now(),
+        old_jkt: previous.kid,
+        new_jkt: next.kid,
+      });
+      return next;
+    },
     protect: (route, handler) => createProtectedHandler(route, handler, config),
   };
 }

@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { describe, it } from 'node:test';
 import type { Jwk, KeyResolver } from '@trailgate/core';
 import { Codes, signRequest, TrailGateError, verifyReceipt } from '@trailgate/core';
-import { generateEd25519KeyPair } from '@trailgate/test-fixtures';
+import { generateEd25519KeyPair, makeGrantPayload, signCompactJws } from '@trailgate/test-fixtures';
 import type { TrailGateServerOptions } from './config.ts';
 import { RECEIPT_HEADER } from './enforcement.ts';
 import type { TrailGateServer } from './server.ts';
@@ -316,5 +316,75 @@ describe('protected request enforcement', () => {
     const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
     const res = await handler(await signedRequest(grant.token));
     assert.equal(errorCode(res), Codes.AUTHORIZATION_DENIED);
+  });
+});
+
+describe('forged and tampered requests', () => {
+  async function forgedGrant(overrides: Parameters<typeof makeGrantPayload>[0]) {
+    const payload = makeGrantPayload({
+      jkt: agent.jkt,
+      issuer: ISSUER,
+      audience: ISSUER,
+      permissions: ['tg.order.create'],
+      ...overrides,
+    });
+    return signCompactJws(payload, {
+      privateJwk: site.privateJwk,
+      kid: site.jkt,
+      typ: 'trailgate-grant+jwt',
+    });
+  }
+
+  function serverWithAgentKey() {
+    const server = makeServer();
+    return server;
+  }
+
+  it('rejects a grant issued for a different audience', async () => {
+    const server = serverWithAgentKey();
+    const token = await forgedGrant({ audience: 'https://other.example.com' });
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const res = await handler(await signedRequest(token));
+    assert.equal(errorCode(res), Codes.REQUEST_AUDIENCE_MISMATCH);
+  });
+
+  it('rejects an expired grant', async () => {
+    const server = serverWithAgentKey();
+    const token = await forgedGrant({ iat: NOW - 4000, exp: NOW - 10 });
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const res = await handler(await signedRequest(token));
+    assert.equal(errorCode(res), Codes.GRANT_EXPIRED);
+  });
+
+  it('rejects a grant carrying an unevaluable constraint type', async () => {
+    const server = serverWithAgentKey();
+    await server.config.stores.agentKeys.register(agent.jkt, agent.publicJwk);
+    const token = await forgedGrant({ constraints: [{ type: 'geo_fence', params: {} }] });
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const res = await handler(await signedRequest(token));
+    assert.equal(errorCode(res), Codes.CONSTRAINT_UNKNOWN_TYPE);
+  });
+
+  it('rejects a tampered body as a digest mismatch', async () => {
+    const server = makeServer();
+    const grant = await issueGrant(server);
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const req = await signedRequest(grant.token, { body: '{"amount":1}' });
+    req.body = '{"amount":999999}';
+    const res = await handler(req);
+    assert.equal(errorCode(res), Codes.REQUEST_BODY_DIGEST_MISMATCH);
+  });
+
+  it('rejects a request missing required headers', async () => {
+    const server = makeServer();
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const res = await handler({
+      method: 'POST',
+      url: `${ISSUER}/orders`,
+      headers: { 'trailgate-grant': 'eyJ.test.test' },
+      body: '',
+    });
+    assert.equal(res.status, 400);
+    assert.equal(errorCode(res), Codes.REQUEST_MALFORMED);
   });
 });
