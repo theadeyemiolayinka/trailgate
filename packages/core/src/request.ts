@@ -88,6 +88,21 @@ function bodyBytes(body: Uint8Array | string | undefined): Uint8Array {
   return body;
 }
 
+/**
+ * Idempotency operation digest per spec section 11.4 / ADR 0008: method,
+ * target URI, `Content-Digest` header value, and grant `jti`. Exported so
+ * callers that store idempotency outcomes compute the identical digest the
+ * verification pipeline compares against.
+ */
+export function operationDigestOf(req: ProtectedRequest, grantId: string): string {
+  return createHash('sha256')
+    .update(
+      `${req.method.toUpperCase()} ${req.url} ${getHeader(req, 'content-digest')} ${grantId}`,
+      'utf8',
+    )
+    .digest('base64url');
+}
+
 export async function verifyProtectedRequest(
   req: ProtectedRequest,
   deps: RequestVerificationDeps,
@@ -194,12 +209,7 @@ export async function verifyProtectedRequest(
   }
 
   const requestDigest = requestDigestOf(signatureBase);
-  const operationDigest = createHash('sha256')
-    .update(
-      `${req.method.toUpperCase()} ${req.url} ${getHeader(req, 'content-digest')} ${grant.jti}`,
-      'utf8',
-    )
-    .digest('base64url');
+  const operationDigest = operationDigestOf(req, grant.jti);
   let idempotentReplay = false;
   const idempotencyKey = getHeader(req, 'idempotency-key');
   const idempotencyStore = deps.idempotency;

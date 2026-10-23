@@ -57,7 +57,7 @@ export function fetchTransport(options?: { timeoutMs?: number }): HttpTransport 
           redirect: 'manual',
           signal: AbortSignal.timeout(timeoutMs),
         };
-        if (req.body !== undefined) {
+        if (req.body !== undefined && req.body.byteLength > 0) {
           init.body = req.body;
         }
         res = await fetch(req.url, init);

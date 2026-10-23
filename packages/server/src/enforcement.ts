@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type {
   GrantPayload,
   Jwk,
@@ -12,6 +11,7 @@ import {
   decodeCompactJws,
   getHeader,
   isTrailGateError,
+  operationDigestOf,
   parseTgSignatureInput,
   TrailGateError,
   toErrorResponse,
@@ -57,20 +57,7 @@ const CODE_TO_STAGE: Record<string, number> = {
   [Codes.AUTHORIZATION_DENIED]: 13,
 };
 
-/**
- * Operation digest per spec section 11.4 / ADR 0008: method, target URI,
- * Content-Digest, and grant jti. Must produce the same value core computes
- * inside `verifyProtectedRequest`; promoting this helper into core is a
- * pending question for D0.
- */
-function operationDigestOf(req: HostRequest, grantId: string): string {
-  return createHash('sha256')
-    .update(
-      `${req.method.toUpperCase()} ${req.url} ${getHeader(req, 'content-digest')} ${grantId}`,
-      'utf8',
-    )
-    .digest('base64url');
-}
+/** Operation digest is computed by core's `operationDigestOf` (spec section 11.4). */
 
 /** Best-effort recovery of the receipt binding inputs from a failed request. */
 function receiptBasis(req: HostRequest): { grantId?: string; signatureBase?: string } {
