@@ -88,6 +88,7 @@ describe('createTrailGateTools', () => {
 
   it('exposes the documented tool names', () => {
     assert.deepEqual(tools.map((t) => t.name).sort(), [
+      'trailgate.access',
       'trailgate.discover',
       'trailgate.fetch',
       'trailgate.grants',

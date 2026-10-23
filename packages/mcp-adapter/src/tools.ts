@@ -237,9 +237,46 @@ export function createTrailGateTools(
       },
     },
     {
+      name: 'trailgate.access',
+      description:
+        'Check whether a usable grant exists locally for a site and scope. Returns a distinguishable status (ready, no_grant, insufficient_permission, expired, wrong_key, revoked, unsupported_version). It never proves access: the site decides at enforcement.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: URL_ARG,
+          permissions: { type: 'array', items: { type: 'string' } },
+          fresh: { type: 'boolean', description: 'also query live grant_status' },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+      handler: async (args) => {
+        try {
+          const result = await client.checkAccess(requireString(args, 'url'), {
+            permissions: stringList(args, 'permissions'),
+            confirmFresh: args['fresh'] === true,
+          });
+          const view: Record<string, unknown> = { status: result.status };
+          if ('grant' in result) {
+            view['grant'] = grantView(result.grant);
+          }
+          if (result.status === 'insufficient_permission') {
+            view['missing'] = result.missing;
+          }
+          if (result.status === 'unsupported_version') {
+            view['site'] = result.site;
+            view['client'] = result.client;
+          }
+          return ok(view);
+        } catch (err) {
+          return fail(err);
+        }
+      },
+    },
+    {
       name: 'trailgate.fetch',
       description:
-        'Send a TrailGate-signed request to a path on a discovered site. The target cannot leave the site origin.',
+        "Send a TrailGate-signed request to a path on a discovered site. The target cannot leave the site origin; there is no way to sign or send to another origin. Denials return the site's tg.* code; receipts are verified against the site's published keys and reported honestly.",
       inputSchema: {
         type: 'object',
         properties: {
