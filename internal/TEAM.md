@@ -28,4 +28,4 @@ Workstream codes (D0 to D3) are used throughout the repository as shorthand. Thi
 | --- | --- | --- |
 | License selection | D0 | Phase 5 |
 | Protocol draft version 0.1 | D0 | Phase 1 |
-| ExampleShop framework choice | D3 | Phase 3 |
+| ~~ExampleShop framework choice~~ | D3 | decided: node:http + node:sqlite, zero added deps |

@@ -2,5 +2,24 @@
   "name": "example-shop",
   "version": "0.0.0",
   "private": true,
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.ts",
+    "start": "node src/server.ts",
+    "certs": "bash scripts/dev-certs.sh",
+    "demo": "node src/dev/demo-agent.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@trailgate/core": "workspace:*",
+    "@trailgate/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@trailgate/agent": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
 }

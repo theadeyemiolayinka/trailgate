@@ -1,0 +1,969 @@
+import { isTrailGateError } from '@trailgate/core';
+import type { HostRequest, HostResponse } from '@trailgate/server';
+import { createAgentApi } from './api/routes.ts';
+import type { ShopConfig } from './config.ts';
+import type { Db } from './db/database.ts';
+import { CartError, getCart, setCartQty } from './domain/cart.ts';
+import { getProduct, listCategories, listProducts } from './domain/catalog.ts';
+import {
+  cancelOrder,
+  createOrderFromCart,
+  getInvoice,
+  getOrder,
+  listOrderItems,
+  listOrders,
+  OrderError,
+  payOrder,
+  refundOrder,
+} from './domain/orders.ts';
+import {
+  AuthError,
+  authenticate,
+  createSession,
+  createUser,
+  deleteAddress,
+  destroySession,
+  getAddress,
+  getSession,
+  getUser,
+  listAddresses,
+  saveAddress,
+  ValidationError,
+} from './domain/users.ts';
+import {
+  getWallet,
+  InsufficientFundsError,
+  listWalletEntries,
+  topUp,
+  WalletError,
+} from './domain/wallet.ts';
+import { CsrfError, parseCookies, parseForm, requireCsrf } from './http/forms.ts';
+import { html, redirect } from './http/responses.ts';
+import type { AppRequest, AppResponse } from './http/router.ts';
+import { Router } from './http/router.ts';
+import { createShopTrailGate, type ShopTrailGate } from './tg/server.ts';
+import { page } from './ui/layout.ts';
+import { renderAddresses, renderProfile } from './ui/pages/account.ts';
+import { type ActivityRow, renderActivity } from './ui/pages/activity.ts';
+import { renderError, renderLogin, renderNotFound, renderRegister } from './ui/pages/auth.ts';
+import { renderCart } from './ui/pages/cart.ts';
+import { renderCatalog } from './ui/pages/catalog.ts';
+import { renderCheckout } from './ui/pages/checkout.ts';
+import {
+  type GrantRequestView,
+  type IssuedGrantView,
+  renderConnections,
+} from './ui/pages/connections.ts';
+import { renderConsent } from './ui/pages/consent.ts';
+import { renderHome } from './ui/pages/home.ts';
+import { renderInvoice } from './ui/pages/invoice.ts';
+import { renderOrderDetail, renderOrderList } from './ui/pages/orders.ts';
+import { renderProduct } from './ui/pages/product.ts';
+import { renderWallet } from './ui/pages/wallet.ts';
+import type { RenderCtx } from './ui/render.ts';
+
+const SESSION_COOKIE = 'shop_session';
+const MAX_BODY_BYTES = 65_536;
+
+export interface ShopApp {
+  /** Handles a node:http request; used by both the HTTP and HTTPS listeners. */
+  handle(req: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body?: Uint8Array;
+  }): Promise<AppResponse>;
+  tg: ShopTrailGate;
+  /** The authoritative database handle (exposed for tests and tooling). */
+  db: Db;
+}
+
+interface Ctx {
+  db: Db;
+  config: ShopConfig;
+  tg: ShopTrailGate;
+}
+
+function isProtectedPath(path: string): boolean {
+  return (
+    path === '/.well-known/trailgate' ||
+    path.startsWith('/api/') ||
+    path === '/tg/grant-request' ||
+    path === '/tg/grant-redemption' ||
+    path === '/tg/grant-revocation' ||
+    path === '/tg/grant-status'
+  );
+}
+
+function sessionCookie(id: string, tls: boolean, maxAge: number): string {
+  const parts = [
+    `${SESSION_COOKIE}=${id}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${maxAge}`,
+  ];
+  if (tls) {
+    parts.push('Secure');
+  }
+  return parts.join('; ');
+}
+
+function clearSessionCookie(tls: boolean): string {
+  return sessionCookie('', tls, 0);
+}
+
+function reqSession(
+  ctx: Ctx,
+  req: AppRequest,
+):
+  | { session: NonNullable<AppRequest['session']>; user: NonNullable<AppRequest['user']> }
+  | undefined {
+  if (req.session === undefined || req.user === undefined) {
+    return undefined;
+  }
+  return { session: req.session, user: req.user };
+}
+
+function loginRedirect(path: string): AppResponse {
+  return redirect(`/login?next=${encodeURIComponent(path)}`);
+}
+
+function hostToAppRequest(
+  ctx: Ctx,
+  req: { method: string; url: string; headers: Record<string, string>; body?: Uint8Array },
+): AppRequest {
+  const url = new URL(req.url, ctx.config.issuer);
+  const cookies = parseCookies(req.headers['cookie']);
+  const sessionId = cookies[SESSION_COOKIE];
+  const session = sessionId !== undefined ? getSession(ctx.db, sessionId) : undefined;
+  const user = session !== undefined ? getUser(ctx.db, session.userId) : undefined;
+  return {
+    method: req.method.toUpperCase(),
+    path: url.pathname,
+    url,
+    params: {},
+    query: url.searchParams,
+    headers: req.headers,
+    cookies,
+    ...(req.body !== undefined ? { body: req.body } : {}),
+    ...(session !== undefined ? { session } : {}),
+    ...(user !== undefined ? { user } : {}),
+  };
+}
+
+function render(
+  ctx: Ctx,
+  req: AppRequest,
+  options: Parameters<typeof page>[0] & { status?: number },
+): AppResponse {
+  const cart = req.user !== undefined ? getCart(ctx.db, req.user.id) : undefined;
+  return html(
+    page({
+      ...options,
+      ...(req.user !== undefined ? { user: req.user } : {}),
+      ...(cart !== undefined ? { cartCount: cart.itemCount } : {}),
+    }),
+    options.status ?? 200,
+  );
+}
+
+export function createShopApp(db: Db, config: ShopConfig): ShopApp {
+  const tg = createShopTrailGate(db, config);
+  const ctx: Ctx = { db, config, tg };
+  const api = createAgentApi(db, tg.tg);
+  const router = buildRoutes(ctx);
+
+  return {
+    tg,
+    db,
+    handle: async (raw) => {
+      // Protocol and agent-API traffic goes through the SDK with the
+      // issuer-absolute URI the agent signed (the adapter rule in
+      // INTEGRATION.md).
+      const url = new URL(raw.url, config.issuer);
+      if (isProtectedPath(url.pathname)) {
+        const hostReq: HostRequest = {
+          method: raw.method,
+          url: `${config.issuer}${raw.url}`,
+          headers: raw.headers,
+          ...(raw.body !== undefined ? { body: raw.body } : {}),
+        };
+        const res = await protocolOrApi(ctx, api.dispatch, hostReq);
+        return {
+          status: res.status,
+          headers: res.headers ?? {},
+          body:
+            res.body === undefined
+              ? ''
+              : typeof res.body === 'string'
+                ? res.body
+                : JSON.stringify(res.body),
+        };
+      }
+      const req = hostToAppRequest(ctx, raw);
+      try {
+        const matched = router.match(req.method, req.path);
+        if (matched === undefined) {
+          return render(ctx, req, { title: 'Not found', body: renderNotFound() });
+        }
+        req.params = matched.params;
+        return await matched.handler(req);
+      } catch (err) {
+        if (err instanceof CsrfError) {
+          return render(ctx, req, {
+            title: 'Form expired',
+            body: renderError('Your form session expired. Go back and try again.'),
+          });
+        }
+        throw err;
+      }
+    },
+  };
+}
+
+async function protocolOrApi(
+  ctx: Ctx,
+  apiDispatch: (req: HostRequest) => Promise<HostResponse | undefined>,
+  req: HostRequest,
+): Promise<HostResponse> {
+  const path = new URL(req.url).pathname;
+  if (path === '/.well-known/trailgate') {
+    return {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'cache-control': 'max-age=300' },
+      body: ctx.tg.tg.discoveryDocument(),
+    };
+  }
+  if (path === '/tg/grant-request') {
+    return ctx.tg.tg.handleGrantRequest(req);
+  }
+  if (path === '/tg/grant-redemption') {
+    return ctx.tg.tg.handleRedemption(req);
+  }
+  if (path === '/tg/grant-revocation') {
+    return ctx.tg.tg.handleRevocation(req);
+  }
+  if (path === '/tg/grant-status') {
+    return ctx.tg.tg.handleStatus(req);
+  }
+  const apiRes = await apiDispatch(req);
+  if (apiRes !== undefined) {
+    return apiRes;
+  }
+  return {
+    status: 404,
+    headers: { 'content-type': 'application/json' },
+    body: { error: { code: 'shop.route.not_found', message: 'unknown route' } },
+  };
+}
+
+function nextPath(req: AppRequest, form: Record<string, string>): string {
+  const next = form['next'];
+  if (typeof next === 'string' && next.startsWith('/') && !next.startsWith('//')) {
+    return next;
+  }
+  return req.url.searchParams.get('next') ?? '/';
+}
+
+function buildRoutes(ctx: Ctx): Router {
+  const { db } = ctx;
+  const router = new Router();
+
+  const authed = (
+    handler: (
+      req: AppRequest,
+      user: NonNullable<AppRequest['user']>,
+    ) => Promise<AppResponse> | AppResponse,
+  ): ((req: AppRequest) => Promise<AppResponse> | AppResponse) => {
+    return (req) => {
+      const auth = reqSession(ctx, req);
+      if (auth === undefined) {
+        return loginRedirect(req.path + (req.url.search === '' ? '' : req.url.search));
+      }
+      return handler(req, auth.user);
+    };
+  };
+
+  // ---------- storefront ----------
+
+  router.get('/', (req) =>
+    render(ctx, req, {
+      title: 'Goods for a considered desk',
+      section: 'home',
+      body: renderHome(
+        { ...(req.user !== undefined ? { user: req.user } : {}) },
+        listProducts(db).slice(0, 6),
+      ),
+    }),
+  );
+
+  router.get('/products', (req) => {
+    const category = req.query.get('category') ?? undefined;
+    return render(ctx, req, {
+      title: 'Catalog',
+      section: 'products',
+      body: renderCatalog(
+        {},
+        category !== undefined ? listProducts(db, category) : listProducts(db),
+        listCategories(db),
+        category,
+      ),
+    });
+  });
+
+  router.get('/products/:sku', (req) => {
+    const product = getProduct(db, req.params['sku'] as string);
+    if (product === undefined) {
+      return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+    }
+    return render(ctx, req, {
+      title: product.name,
+      section: 'products',
+      body: renderProduct(
+        {
+          ...(req.session !== undefined ? { session: req.session } : {}),
+          ...(req.user !== undefined ? { user: req.user } : {}),
+        },
+        product,
+      ),
+    });
+  });
+
+  // ---------- cart ----------
+
+  router.get(
+    '/cart',
+    authed((req, user) =>
+      render(ctx, req, {
+        title: 'Your cart',
+        section: 'cart',
+        body: renderCart(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          getCart(db, user.id),
+        ),
+      }),
+    ),
+  );
+
+  const cartPost = (fn: (form: Record<string, string>, userId: string) => void, target = '/cart') =>
+    authed((req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      try {
+        fn(form, user.id);
+      } catch (err) {
+        if (err instanceof CartError) {
+          return render(ctx, req, {
+            title: 'Your cart',
+            section: 'cart',
+            body: renderCart(
+              {
+                ...(req.session !== undefined ? { session: req.session } : {}),
+                flash: { kind: 'error', text: err.message },
+              },
+              getCart(db, user.id),
+            ),
+            flash: { kind: 'error', text: err.message },
+          });
+        }
+        throw err;
+      }
+      return redirect(target);
+    });
+
+  router.post(
+    '/cart/add',
+    cartPost((form, userId) => {
+      setCartQty(db, userId, form['sku'] ?? '', Number.parseInt(form['qty'] ?? '1', 10));
+    }),
+  );
+  router.post(
+    '/cart/update',
+    cartPost((form, userId) => {
+      setCartQty(db, userId, form['sku'] ?? '', Number.parseInt(form['qty'] ?? '0', 10));
+    }),
+  );
+  router.post(
+    '/cart/remove',
+    cartPost((form, userId) => {
+      setCartQty(db, userId, form['sku'] ?? '', 0);
+    }),
+  );
+
+  // ---------- checkout ----------
+
+  router.get(
+    '/checkout',
+    authed((req, user) =>
+      render(ctx, req, {
+        title: 'Checkout',
+        section: 'cart',
+        body: renderCheckout(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          getCart(db, user.id),
+          getWallet(db, user.id),
+          listAddresses(db, user.id),
+        ),
+      }),
+    ),
+  );
+
+  router.post(
+    '/checkout',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const addressId = form['address_id'] === '' ? undefined : form['address_id'];
+      try {
+        const order = createOrderFromCart(db, user.id, {
+          ...(addressId !== undefined ? { addressId } : {}),
+          placedVia: 'user',
+        });
+        payOrder(db, order.id, user.id);
+        return redirect(`/orders/${order.id}`);
+      } catch (err) {
+        if (
+          err instanceof OrderError ||
+          err instanceof InsufficientFundsError ||
+          err instanceof WalletError
+        ) {
+          return render(ctx, req, {
+            title: 'Checkout',
+            section: 'cart',
+            body: renderCheckout(
+              { ...(req.session !== undefined ? { session: req.session } : {}) },
+              getCart(db, user.id),
+              getWallet(db, user.id),
+              listAddresses(db, user.id),
+              err.message,
+            ),
+          });
+        }
+        throw err;
+      }
+    }),
+  );
+
+  // ---------- orders ----------
+
+  router.get(
+    '/orders',
+    authed((req, user) =>
+      render(ctx, req, {
+        title: 'Orders',
+        section: 'orders',
+        body: renderOrderList({}, listOrders(db, user.id)),
+      }),
+    ),
+  );
+
+  router.get(
+    '/orders/:id',
+    authed((req, user) => {
+      const order = getOrder(db, req.params['id'] as string, user.id);
+      if (order === undefined) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      const address =
+        order.addressId !== undefined ? getAddress(db, order.addressId, user.id) : undefined;
+      return render(ctx, req, {
+        title: `Order ${order.id}`,
+        section: 'orders',
+        body: renderOrderDetail(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          order,
+          listOrderItems(db, order.id),
+          getWallet(db, user.id),
+          address,
+        ),
+      });
+    }),
+  );
+
+  router.get(
+    '/orders/:id/invoice',
+    authed((req, user) => {
+      const invoice = getInvoice(db, req.params['id'] as string, user.id);
+      if (invoice === undefined) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      return render(ctx, req, {
+        title: `Invoice ${invoice.order.id}`,
+        section: 'orders',
+        body: renderInvoice({}, invoice),
+      });
+    }),
+  );
+
+  router.post(
+    '/orders/:id/pay',
+    authed((req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const id = req.params['id'] as string;
+      try {
+        payOrder(db, id, user.id);
+      } catch (err) {
+        if (err instanceof OrderError || err instanceof InsufficientFundsError) {
+          return redirect(`/orders/${id}`);
+        }
+        throw err;
+      }
+      return redirect(`/orders/${id}`);
+    }),
+  );
+
+  router.post(
+    '/orders/:id/cancel',
+    authed((req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const id = req.params['id'] as string;
+      try {
+        cancelOrder(db, id, user.id);
+      } catch (err) {
+        if (!(err instanceof OrderError)) {
+          throw err;
+        }
+      }
+      return redirect(`/orders/${id}`);
+    }),
+  );
+
+  router.post(
+    '/orders/:id/refund',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const id = req.params['id'] as string;
+      try {
+        const order = getOrder(db, id, user.id);
+        const { refund } = refundOrder(db, id, user.id);
+        // Spec section 12: refunds restore grant headroom as offsetting entries.
+        if (order?.grantJti !== undefined) {
+          await ctx.tg.tg.config.stores.ledger.postRefund({
+            grantId: order.grantJti,
+            amount: refund,
+            now: Math.floor(Date.now() / 1000),
+          });
+        }
+      } catch (err) {
+        if (!(err instanceof OrderError)) {
+          throw err;
+        }
+      }
+      return redirect(`/orders/${id}`);
+    }),
+  );
+
+  // ---------- account ----------
+
+  router.get(
+    '/account',
+    authed((req, user) =>
+      render(ctx, req, { title: 'Account', section: 'account', body: renderProfile({ user }) }),
+    ),
+  );
+
+  router.get(
+    '/account/addresses',
+    authed((req, user) =>
+      render(ctx, req, {
+        title: 'Addresses',
+        section: 'account',
+        body: renderAddresses(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          listAddresses(db, user.id),
+        ),
+      }),
+    ),
+  );
+
+  router.post(
+    '/account/addresses',
+    authed((req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      try {
+        saveAddress(db, user.id, {
+          label: form['label'] ?? '',
+          line1: form['line1'] ?? '',
+          ...(form['line2'] !== undefined && form['line2'] !== '' ? { line2: form['line2'] } : {}),
+          city: form['city'] ?? '',
+          ...(form['region'] !== undefined && form['region'] !== ''
+            ? { region: form['region'] }
+            : {}),
+          postcode: form['postcode'] ?? '',
+          country: form['country'] ?? '',
+          isDefault: form['is_default'] === 'on',
+        });
+      } catch (err) {
+        if (err instanceof ValidationError) {
+          return render(ctx, req, {
+            title: 'Addresses',
+            section: 'account',
+            body: renderAddresses(
+              {
+                ...(req.session !== undefined ? { session: req.session } : {}),
+                flash: { kind: 'error', text: err.message },
+              },
+              listAddresses(db, user.id),
+            ),
+            flash: { kind: 'error', text: err.message },
+          });
+        }
+        throw err;
+      }
+      return redirect('/account/addresses');
+    }),
+  );
+
+  router.post(
+    '/account/addresses/:id/delete',
+    authed((req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      deleteAddress(db, req.params['id'] as string, user.id);
+      return redirect('/account/addresses');
+    }),
+  );
+
+  // ---------- wallet ----------
+
+  router.get(
+    '/account/wallet',
+    authed((req, user) =>
+      render(ctx, req, {
+        title: 'Wallet',
+        section: 'account',
+        body: renderWallet(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          getWallet(db, user.id),
+          listWalletEntries(db, user.id),
+        ),
+      }),
+    ),
+  );
+
+  router.post(
+    '/account/wallet/topup',
+    authed((req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const amount = Number.parseFloat(form['amount'] ?? '0');
+      try {
+        // Form posts major units; convert to integer minor units.
+        const minor = Math.round(amount * 100);
+        topUp(db, user.id, { amount: minor, currency: 'USD' });
+      } catch (err) {
+        if (err instanceof WalletError) {
+          return render(ctx, req, {
+            title: 'Wallet',
+            section: 'account',
+            body: renderWallet(
+              { ...(req.session !== undefined ? { session: req.session } : {}) },
+              getWallet(db, user.id),
+              listWalletEntries(db, user.id),
+            ),
+            flash: { kind: 'error', text: err.message },
+          });
+        }
+        throw err;
+      }
+      return redirect('/account/wallet');
+    }),
+  );
+
+  // ---------- agent connections and activity ----------
+
+  router.get(
+    '/account/connections',
+    authed((req, user) => {
+      const requestRows = db
+        .prepare(
+          'SELECT request_id, created_at, expires_at, status, body, agent_jkt, grant_id FROM tg_grant_requests WHERE subject = ? ORDER BY created_at DESC',
+        )
+        .all(user.id) as {
+        request_id: string;
+        created_at: number;
+        expires_at: number;
+        status: string;
+        body: string;
+        agent_jkt: string;
+        grant_id: string | null;
+      }[];
+      const requests: GrantRequestView[] = requestRows.map((row) => {
+        const body = JSON.parse(row.body) as { permissions?: string[] };
+        return {
+          requestId: row.request_id,
+          createdAt: row.created_at,
+          expiresAt: row.expires_at,
+          status: row.status,
+          agentJkt: row.agent_jkt,
+          permissions: body.permissions ?? [],
+          ...(row.grant_id !== null ? { grantId: row.grant_id } : {}),
+        };
+      });
+      const grantRows = db
+        .prepare('SELECT * FROM tg_grants WHERE subject = ? ORDER BY issued_at DESC')
+        .all(user.id) as {
+        jti: string;
+        issued_at: number;
+        expires_at: number;
+        agent_jkt: string;
+        status: 'active' | 'revoked';
+        request_id: string;
+        revoked_at: number | null;
+        revocation_reason: string | null;
+        revocation_actor: string | null;
+      }[];
+      const grants: IssuedGrantView[] = grantRows.map((row) => {
+        const reqRow = db
+          .prepare(
+            'SELECT effective_permissions, effective_resources, effective_constraints FROM tg_grant_requests WHERE request_id = ?',
+          )
+          .get(row.request_id) as
+          | {
+              effective_permissions: string | null;
+              effective_resources: string | null;
+              effective_constraints: string | null;
+            }
+          | undefined;
+        const jsonField = (value: string | null | undefined): unknown[] =>
+          value === null || value === undefined ? [] : (JSON.parse(value) as unknown[]);
+        return {
+          jti: row.jti,
+          agentJkt: row.agent_jkt,
+          issuedAt: row.issued_at,
+          expiresAt: row.expires_at,
+          status: row.status,
+          permissions: jsonField(reqRow?.effective_permissions) as string[],
+          resources: jsonField(reqRow?.effective_resources) as string[],
+          constraints: jsonField(reqRow?.effective_constraints) as IssuedGrantView['constraints'],
+          ...(row.revoked_at !== null ? { revokedAt: row.revoked_at } : {}),
+          ...(row.revocation_reason !== null ? { revocationReason: row.revocation_reason } : {}),
+          ...(row.revocation_actor !== null ? { revocationActor: row.revocation_actor } : {}),
+        };
+      });
+      return render(ctx, req, {
+        title: 'Agent connections',
+        section: 'account',
+        body: renderConnections(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          requests,
+          grants,
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/account/connections/:jti/revoke',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const jti = req.params['jti'] as string;
+      const grant = db.prepare('SELECT subject FROM tg_grants WHERE jti = ?').get(jti) as
+        | { subject: string | null }
+        | undefined;
+      if (grant?.subject !== user.id) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      await ctx.tg.tg.revokeGrant(jti, {
+        reason:
+          typeof form['reason'] === 'string' && form['reason'] !== ''
+            ? form['reason']
+            : 'revoked from account page',
+        actor: `user:${user.id}`,
+      });
+      return redirect('/account/connections');
+    }),
+  );
+
+  router.get(
+    '/account/activity',
+    authed((req, user) => {
+      const grants = db
+        .prepare('SELECT jti, request_id FROM tg_grants WHERE subject = ?')
+        .all(user.id) as { jti: string; request_id: string }[];
+      const requestIds = db
+        .prepare('SELECT request_id FROM tg_grant_requests WHERE subject = ?')
+        .all(user.id) as { request_id: string }[];
+      const rows: ActivityRow[] = [];
+      for (const grant of grants) {
+        rows.push(...ctx.tg.audit.listForGrant(grant.jti));
+        rows.push(...ctx.tg.audit.listForRequest(grant.request_id));
+      }
+      const seen = new Set<string>();
+      const deduped = rows.filter((row) => {
+        if (seen.has(row.id)) {
+          return false;
+        }
+        seen.add(row.id);
+        return true;
+      });
+      deduped.sort((a, b) => b.event.at - a.event.at);
+      const agentOrders = listOrders(db, user.id).filter((o) => o.placedVia === 'agent');
+      return render(ctx, req, {
+        title: 'Activity',
+        section: 'account',
+        body: renderActivity({}, deduped, agentOrders),
+      });
+    }),
+  );
+
+  // ---------- consent (spec section 10.3, host-owned) ----------
+
+  router.get(
+    '/tg/consent',
+    authed(async (req, _user) => {
+      const requestId = req.query.get('request_id') ?? '';
+      const view = await ctx.tg.tg.getConsent(requestId);
+      if (view === undefined) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      return render(ctx, req, {
+        title: 'Approve agent access',
+        section: 'account',
+        body: renderConsent(
+          {
+            ...(req.user !== undefined ? { user: req.user } : {}),
+            ...(req.session !== undefined ? { session: req.session } : {}),
+          },
+          view,
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/tg/consent/decide',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const requestId = form['request_id'] ?? '';
+      const decision = form['decision'] === 'approve' ? 'approve' : 'deny';
+      try {
+        const outcome = await ctx.tg.tg.decideConsent(requestId, decision, user.id);
+        if (outcome.redirectTo !== undefined) {
+          return { status: 302, headers: { location: outcome.redirectTo } };
+        }
+        return redirect('/account/connections');
+      } catch (err) {
+        if (isTrailGateError(err)) {
+          const view = await ctx.tg.tg.getConsent(requestId);
+          return render(ctx, req, {
+            title: 'Approve agent access',
+            section: 'account',
+            status: err.httpStatus === 404 ? 404 : 400,
+            body:
+              view === undefined
+                ? renderError(err.message)
+                : renderConsent(
+                    {
+                      ...(req.user !== undefined ? { user: req.user } : {}),
+                      ...(req.session !== undefined ? { session: req.session } : {}),
+                    },
+                    view,
+                  ),
+            flash: { kind: 'error', text: err.message },
+          });
+        }
+        throw err;
+      }
+    }),
+  );
+
+  // ---------- auth ----------
+
+  router.get('/login', (req) => {
+    if (req.user !== undefined) {
+      return redirect('/');
+    }
+    const next = req.query.get('next') ?? '/';
+    return render(ctx, req, { title: 'Sign in', body: renderLogin({}, next) });
+  });
+
+  router.post('/login', async (req) => {
+    const form = parseForm(req);
+    const next = nextPath(req, form);
+    try {
+      const user = authenticate(db, form['email'] ?? '', form['password'] ?? '');
+      const session = createSession(db, user.id);
+      return {
+        status: 303,
+        headers: {
+          location: next,
+          'set-cookie': sessionCookie(
+            session.id,
+            ctx.config.tls,
+            session.expiresAt - Math.floor(Date.now() / 1000),
+          ),
+        },
+      };
+    } catch (err) {
+      if (err instanceof AuthError) {
+        return render(ctx, req, {
+          title: 'Sign in',
+          status: 401,
+          body: renderLogin({}, next, err.message),
+        });
+      }
+      throw err;
+    }
+  });
+
+  router.get('/register', (req) => {
+    if (req.user !== undefined) {
+      return redirect('/');
+    }
+    const next = req.query.get('next') ?? '/';
+    return render(ctx, req, { title: 'Create account', body: renderRegister({}, next) });
+  });
+
+  router.post('/register', async (req) => {
+    const form = parseForm(req);
+    const next = nextPath(req, form);
+    try {
+      const user = createUser(db, {
+        email: form['email'] ?? '',
+        name: form['name'] ?? '',
+        password: form['password'] ?? '',
+      });
+      const session = createSession(db, user.id);
+      return {
+        status: 303,
+        headers: {
+          location: next,
+          'set-cookie': sessionCookie(
+            session.id,
+            ctx.config.tls,
+            session.expiresAt - Math.floor(Date.now() / 1000),
+          ),
+        },
+      };
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        return render(ctx, req, {
+          title: 'Create account',
+          status: 400,
+          body: renderRegister({}, next, err.message),
+        });
+      }
+      throw err;
+    }
+  });
+
+  router.post('/logout', (req) => {
+    if (req.session !== undefined) {
+      destroySession(db, req.session.id);
+    }
+    return {
+      status: 303,
+      headers: { location: '/', 'set-cookie': clearSessionCookie(ctx.config.tls) },
+    };
+  });
+
+  return router;
+}

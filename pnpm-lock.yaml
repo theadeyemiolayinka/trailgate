@@ -33,7 +33,24 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
-  apps/example-shop: {}
+  apps/example-shop:
+    dependencies:
+      '@trailgate/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@trailgate/server':
+        specifier: workspace:*
+        version: link:../../packages/server
+    devDependencies:
+      '@trailgate/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.5
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
 
   packages/agent:
     dependencies:
