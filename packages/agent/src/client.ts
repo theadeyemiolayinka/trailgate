@@ -6,6 +6,8 @@ import {
   TrailGateError,
   verifyGrant,
 } from '@trailgate/core';
+import type { AccessCheck, AccessCriteria } from './access.ts';
+import { checkAccessAsync } from './access.ts';
 import type { ConsentCallbackExpectation } from './consent.ts';
 import { validateConsentCallback } from './consent.ts';
 import type { SiteContext } from './discovery.ts';
@@ -135,6 +137,27 @@ export interface AgentClient {
   restorePending(record: PendingGrantRequest): void;
   listGrants(filter?: { issuer?: string }): Promise<StoredGrantRecord[]>;
   getGrant(jti: string): Promise<StoredGrantRecord | undefined>;
+  /**
+   * Checks local grant availability for the site without implying access:
+   * returns a distinguishable `AccessCheck` (missing grant, insufficient
+   * permission, expired, wrong key, revoked, unsupported version, or
+   * `ready`). With `criteria.confirmFresh` a live `grant_status` lookup
+   * also catches server-side revocation.
+   */
+  checkAccess(target: string | SiteContext, criteria?: AccessCriteria): Promise<AccessCheck>;
+  /**
+   * The product flow in one call: discover, check local access, and either
+   * return the ready grant or start the consent flow and return the
+   * session. Callers then await `awaitApproval` or complete the redirect.
+   */
+  ensureGrant(
+    target: string | SiteContext,
+    scope: GrantRequestOptions,
+    options?: { key?: AgentSigner },
+  ): Promise<
+    | { status: 'ready'; grant: StoredGrantRecord }
+    | { status: 'consent_required'; session: ConsentSession; reason: AccessCheck }
+  >;
   /** Signs and sends a protected request (spec section 11). See `ProtectedResponse`. */
   fetchProtected(
     target: string | SiteContext,
@@ -302,6 +325,36 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
 
     getGrant(jti: string) {
       return store.get(jti);
+    },
+
+    async checkAccess(target, criteria = {}): Promise<AccessCheck> {
+      const context = await site(target);
+      return checkAccessAsync(context, await store.list(), criteria, {
+        clock,
+        signers,
+        clientVersions: versions,
+        ...(criteria.confirmFresh === true
+          ? {
+              statusOf: async (grantId: string) =>
+                fetchGrantStatus(context, { grantId }, transport),
+            }
+          : {}),
+      });
+    },
+
+    async ensureGrant(target, scope, options) {
+      const context = await site(target);
+      const check = await this.checkAccess(context, {
+        permissions: scope.permissions,
+        ...(options?.key !== undefined ? { keyId: options.key.jkt } : {}),
+      });
+      if (check.status === 'ready') {
+        return { status: 'ready', grant: check.grant };
+      }
+      const session = await this.requestGrant(context, scope, {
+        ...(options?.key !== undefined ? { key: options.key } : {}),
+      });
+      return { status: 'consent_required', session, reason: check };
     },
 
     async fetchProtected(target, input): Promise<ProtectedResponse> {

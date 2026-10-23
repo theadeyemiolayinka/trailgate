@@ -165,6 +165,18 @@ describe('cli commands', () => {
     assert.equal((await loadPending(stateDir)).length, 0, 'redeemed session is dropped');
   });
 
+  it('access reports distinguishable availability', async () => {
+    const { run } = await setup();
+    const before = await run(['access', ORIGIN, '--permission', 'tg.order.create']);
+    assert.equal(before.code, 1);
+    assert.equal((JSON.parse(before.stdout) as { status: string }).status, 'no_grant');
+
+    await run(['request', ORIGIN, '--permission', 'tg.order.create', '--wait']);
+    const after = await run(['access', ORIGIN, '--permission', 'tg.order.create']);
+    assert.equal(after.code, 0);
+    assert.equal((JSON.parse(after.stdout) as { status: string }).status, 'ready');
+  });
+
   it('status queries by request id', async () => {
     const { run } = await setup();
     const result = await run(['status', ORIGIN, '--request-id', 'req_1']);

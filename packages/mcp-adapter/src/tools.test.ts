@@ -93,6 +93,7 @@ describe('createTrailGateTools', () => {
       'trailgate.grants',
       'trailgate.redeem',
       'trailgate.request',
+      'trailgate.revoke',
       'trailgate.status',
     ]);
   });
@@ -159,5 +160,54 @@ describe('createTrailGateTools', () => {
   it('validates required arguments locally', async () => {
     const result = await tool(tools, 'trailgate.discover').handler({});
     assert.equal(result.isError, true);
+  });
+
+  it('runs the policy gate before sensitive tools and blocks on denial', async () => {
+    const gatedClient = fakeClient();
+    const denied = createTrailGateTools(gatedClient, {
+      beforeAction: (name) => {
+        throw new Error(`policy denied ${name}`);
+      },
+    });
+    for (const name of [
+      'trailgate.request',
+      'trailgate.fetch',
+      'trailgate.redeem',
+      'trailgate.revoke',
+    ]) {
+      const result = await tool(denied, name).handler(
+        name === 'trailgate.redeem'
+          ? { requestId: 'r' }
+          : name === 'trailgate.revoke'
+            ? { url: 'https://x.example.com', grantId: 'g' }
+            : { url: 'https://x.example.com', permissions: ['tg.a.b'], target: '/x' },
+      );
+      assert.equal(result.isError, true, `${name} should be denied`);
+    }
+    assert.equal(
+      gatedClient.calls.filter((c) => c !== 'discover').length,
+      0,
+      'no sensitive call may reach the client when the gate denies',
+    );
+    const readOnly = await tool(denied, 'trailgate.discover').handler({
+      url: 'https://x.example.com',
+    });
+    assert.equal(readOnly.isError, undefined, 'read-only tools skip the gate');
+  });
+
+  it('lets the gate pass sensitive calls through', async () => {
+    const gatedClient = fakeClient();
+    const seen: string[] = [];
+    const gated = createTrailGateTools(gatedClient, {
+      beforeAction: (name) => {
+        seen.push(name);
+      },
+    });
+    const result = await tool(gated, 'trailgate.fetch').handler({
+      url: 'https://x.example.com',
+      target: '/api',
+    });
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(seen, ['trailgate.fetch']);
   });
 });

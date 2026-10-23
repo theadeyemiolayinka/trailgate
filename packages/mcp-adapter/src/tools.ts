@@ -105,13 +105,41 @@ function grantView(record: {
   return view;
 }
 
+export interface TrailGateToolOptions {
+  /**
+   * Local policy gate invoked before sensitive tools (`trailgate.request`,
+   * `trailgate.fetch`, `trailgate.redeem`, `trailgate.revoke`). Use it to
+   * require user confirmation, an allowlist, or runtime policy before the
+   * adapter acts. Throwing denies the call and returns a typed error; the
+   * tool handler is never reached. Read-only tools skip the gate.
+   */
+  beforeAction?: (toolName: string, args: Record<string, unknown>) => void | Promise<void>;
+}
+
 /**
  * The MCP tool surface over an `AgentClient`.
  * @provisional Phase 4 deliverable: names, inputs, and result shapes may
  * change when the real MCP SDK integration lands. The boundary rules above
  * are not provisional.
  */
-export function createTrailGateTools(client: AgentClient): ToolDefinition[] {
+export function createTrailGateTools(
+  client: AgentClient,
+  options: TrailGateToolOptions = {},
+): ToolDefinition[] {
+  const gate = async (
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolResult | undefined> => {
+    if (options.beforeAction === undefined) {
+      return undefined;
+    }
+    try {
+      await options.beforeAction(name, args);
+      return undefined;
+    } catch (err) {
+      return fail(err);
+    }
+  };
   return [
     {
       name: 'trailgate.discover',
@@ -155,6 +183,10 @@ export function createTrailGateTools(client: AgentClient): ToolDefinition[] {
         additionalProperties: false,
       },
       handler: async (args) => {
+        const denied = await gate('trailgate.request', args);
+        if (denied !== undefined) {
+          return denied;
+        }
         try {
           const session = await client.requestGrant(requireString(args, 'url'), {
             permissions: stringList(args, 'permissions'),
@@ -223,6 +255,10 @@ export function createTrailGateTools(client: AgentClient): ToolDefinition[] {
         additionalProperties: false,
       },
       handler: async (args) => {
+        const denied = await gate('trailgate.fetch', args);
+        if (denied !== undefined) {
+          return denied;
+        }
         try {
           const res = await client.fetchProtected(requireString(args, 'url'), {
             target: requireString(args, 'target'),
@@ -287,9 +323,42 @@ export function createTrailGateTools(client: AgentClient): ToolDefinition[] {
         additionalProperties: false,
       },
       handler: async (args) => {
+        const denied = await gate('trailgate.redeem', args);
+        if (denied !== undefined) {
+          return denied;
+        }
         try {
           const grant = await client.redeemGrant(requireString(args, 'requestId'));
           return ok({ status: 'issued', grant: grantView(grant) });
+        } catch (err) {
+          return fail(err);
+        }
+      },
+    },
+    {
+      name: 'trailgate.revoke',
+      description:
+        'Revoke a grant at the issuing site (provisional endpoint in draft 0.1). Removes the local record on success.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: URL_ARG,
+          grantId: { type: 'string' },
+          reason: { type: 'string' },
+        },
+        required: ['url', 'grantId'],
+        additionalProperties: false,
+      },
+      handler: async (args) => {
+        const denied = await gate('trailgate.revoke', args);
+        if (denied !== undefined) {
+          return denied;
+        }
+        try {
+          await client.revokeGrant(requireString(args, 'url'), requireString(args, 'grantId'), {
+            ...(typeof args.reason === 'string' ? { reason: args.reason } : {}),
+          });
+          return ok({ revoked: args['grantId'] });
         } catch (err) {
           return fail(err);
         }

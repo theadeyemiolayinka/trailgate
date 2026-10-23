@@ -100,6 +100,8 @@ function usage(): string {
     '  redeem <url> --request-id id                  redeem an approved pending request',
     '  status <url> (--request-id id | --grant-id id)',
     '                                               query grant status (informational)',
+    '  access <url> [--permission p] [--key jkt] [--fresh]',
+    '                                               check local grant availability; --fresh also queries status',
     '  fetch <url> <target> [--method M] [--body s]',
     '       [--grant-id jti] [--permission p] [--idempotency-key k]',
     '                                               send a signed request to a same-origin target',
@@ -271,6 +273,35 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
         });
         print(status);
         return 0;
+      }
+
+      case 'access': {
+        const url = rest[0];
+        if (url === undefined) {
+          stderr('access requires a site url');
+          return 2;
+        }
+        const client = await (deps.clientFactory ?? defaultClientFactory)({ stateDir });
+        const result = await client.checkAccess(url, {
+          ...(flag(parsed, 'permission') !== undefined
+            ? { permissions: flagAll(parsed, 'permission') }
+            : {}),
+          ...(flag(parsed, 'key') !== undefined ? { keyId: flag(parsed, 'key') as string } : {}),
+          confirmFresh: parsed.flags.has('fresh'),
+        });
+        const view: Record<string, unknown> = { status: result.status };
+        if ('grant' in result) {
+          view['grant'] = grantView(result.grant);
+        }
+        if (result.status === 'insufficient_permission') {
+          view['missing'] = result.missing;
+        }
+        if (result.status === 'unsupported_version') {
+          view['site'] = result.site;
+          view['client'] = result.client;
+        }
+        print(view);
+        return result.status === 'ready' ? 0 : 1;
       }
 
       case 'fetch': {

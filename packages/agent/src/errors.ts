@@ -41,3 +41,18 @@ export function errorFromResponse(status: number, body: Uint8Array): TrailGateEr
   }
   return new TrailGateError(Codes.INTERNAL_ERROR, `unexpected response status ${status}`);
 }
+
+/**
+ * Codes where a retry may succeed without changing the request's meaning
+ * (spec/errors.md "Expected behavior"). Everything else is terminal or
+ * requires a different request, grant, or user action.
+ */
+const RETRYABLE_CODES: ReadonlySet<string> = new Set([
+  Codes.INTERNAL_UNAVAILABLE,
+  Codes.INTERNAL_ERROR,
+]);
+
+/** True when the error code permits a backoff-and-retry. */
+export function isRetryableCode(code: string): boolean {
+  return RETRYABLE_CODES.has(code);
+}

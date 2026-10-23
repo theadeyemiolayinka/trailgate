@@ -33,6 +33,9 @@ The SDK separates what a model runtime may see from what the protocol needs:
 | Origin pinning | `resolveSiteUrl` | Protected traffic cannot leave the discovered origin; the SDK is not an arbitrary fetch tool |
 | Receipt verification | `verifyReceiptHeader`, `ProtectedResponse.receipt` | Section 14.3; bound to the exact sent signature base via `tg.request_digest`; failures reported, not thrown |
 | Revocation | `client.revokeGrant` | Provisional; see below |
+| Availability | `client.checkAccess`, `client.ensureGrant`, `checkAccessAsync` | Distinguishable verdicts: `ready`, `no_grant`, `insufficient_permission`, `expired`, `wrong_key`, `revoked` (with `confirmFresh`), `unsupported_version`. A stored token is never proof of access. |
+| Key custody | `AgentKeyProvider`, `ProcessKeyProvider`, `FileKeyProvider` | See `KEYS.md`; no silent downgrade to weaker storage |
+| Retry classification | `isRetryableCode` | `tg.internal.unavailable`/`tg.internal.error` only (spec/errors.md) |
 | Error reporting | `parseErrorEnvelope`, `errorFromResponse`, `ProtectedResponse.error` | Section 16 + `spec/errors.md` |
 
 ## Provisional surfaces

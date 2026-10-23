@@ -256,4 +256,112 @@ describe('agent against the server SDK (end to end)', () => {
       (err) => err instanceof AgentError && err.kind === 'no_grant',
     );
   });
+
+  it('detects replay when a nonce is reused', async () => {
+    const server = makeServer();
+    const routes = new Map([
+      [
+        '/api/orders',
+        server.protect({ permission: 'tg.order.create' }, async () => ({ status: 200 })),
+      ],
+    ]);
+    const { transport } = hostTransport(server, routes);
+    const client = createAgentClient({ transport });
+    client.useKey(SoftwareKeyProvider.generate());
+    const ctx = await client.discover(ORIGIN);
+    const session = await client.requestGrant(ctx, { permissions: ['tg.order.create'] });
+    await server.decideConsent(session.requestId, 'approve', 'user_1');
+    await client.awaitApproval(session.requestId, instantPoll);
+
+    const nonce = `nonce_${'a'.repeat(24)}`;
+    const first = await client.fetchProtected(ctx, {
+      method: 'POST',
+      target: '/api/orders',
+      nonce,
+    });
+    assert.equal(first.status, 200);
+    const replay = await client.fetchProtected(ctx, {
+      method: 'POST',
+      target: '/api/orders',
+      nonce,
+    });
+    assert.equal(replay.error?.code, Codes.REQUEST_REPLAY_DETECTED);
+  });
+
+  it('rejects a body tampered after signing', async () => {
+    const server = makeServer();
+    const routes = new Map([
+      [
+        '/api/orders',
+        server.protect({ permission: 'tg.order.create' }, async () => ({ status: 200 })),
+      ],
+    ]);
+    const { transport, requests } = hostTransport(server, routes);
+    // Tamper path: mutate the body bytes after the client signed them.
+    const tampering = {
+      send: async (req: AgentHttpRequest) => {
+        if (req.url.endsWith('/api/orders')) {
+          return transport.send({ ...req, body: new TextEncoder().encode('{"forged":true}') });
+        }
+        return transport.send(req);
+      },
+    };
+    const client = createAgentClient({ transport: tampering });
+    client.useKey(SoftwareKeyProvider.generate());
+    const ctx = await client.discover(ORIGIN);
+    const session = await client.requestGrant(ctx, { permissions: ['tg.order.create'] });
+    await server.decideConsent(session.requestId, 'approve', 'user_1');
+    await client.awaitApproval(session.requestId, instantPoll);
+
+    const res = await client.fetchProtected(ctx, {
+      method: 'POST',
+      target: '/api/orders',
+      body: '{"item":1}',
+    });
+    assert.equal(res.error?.code, Codes.REQUEST_BODY_DIGEST_MISMATCH);
+    assert.ok(requests.some((r) => r.url.endsWith('/api/orders')));
+  });
+
+  it('evicts a locally stored grant when the site reports it expired', async () => {
+    const serverNow = { t: 1_800_000_000 };
+    const server = createTrailGateServer({
+      issuer: ORIGIN,
+      signingKeys: [{ privateJwk: siteKey.privateJwk }],
+      permissions: ['tg.order.create'],
+      revocationAuthorizer: async () => ({ actor: 'test' }),
+      clock: { now: () => serverNow.t },
+    });
+    const routes = new Map([
+      [
+        '/api/orders',
+        server.protect({ permission: 'tg.order.create' }, async () => ({ status: 200 })),
+      ],
+    ]);
+    const { transport } = hostTransport(server, routes);
+    const store = new InMemoryGrantStore();
+    // Client and site share a clock so the signature window stays valid
+    // while the grant itself expires (stage 5, not stage 4).
+    const client = createAgentClient({
+      transport,
+      grantStore: store,
+      clock: { now: () => serverNow.t },
+    });
+    client.useKey(SoftwareKeyProvider.generate());
+    const ctx = await client.discover(ORIGIN);
+    const session = await client.requestGrant(ctx, {
+      permissions: ['tg.order.create'],
+      requestedSeconds: 60,
+    });
+    await server.decideConsent(session.requestId, 'approve', 'user_1');
+    const grant = await client.awaitApproval(session.requestId, instantPoll);
+
+    serverNow.t += 3600; // move the site clock past the grant's exp
+    const res = await client.fetchProtected(ctx, {
+      method: 'POST',
+      target: '/api/orders',
+      grantId: grant.jti,
+    });
+    assert.equal(res.error?.code, Codes.GRANT_EXPIRED);
+    assert.equal(await client.getGrant(grant.jti), undefined, 'expired grant must be evicted');
+  });
 });
