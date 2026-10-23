@@ -8,6 +8,14 @@ The SDK never replaces the site's authentication, consent surface, or business
 logic. It exposes framework-neutral `HostRequest`/`HostResponse` values; the
 host adapts its own framework.
 
+## Install
+
+`@trailgate/server` is a pnpm workspace package in this monorepo. Depend on it
+with `"@trailgate/server": "workspace:*"` (as `apps/example-shop` does) and run
+`pnpm -r build` so `dist/` exists. Its only runtime dependencies are
+`@trailgate/core` and `jose`. There is no registry publication yet; versioning
+follows the draft spec (`0.1-draft`), not semver.
+
 ## Setup outline
 
 ```ts

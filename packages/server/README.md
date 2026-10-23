@@ -6,6 +6,35 @@ Owner: D1 (see `internal/TEAM.md`).
 
 Status: Phase 2 foundation against draft 0.1 (`spec/protocol.md`). Experimental; not production ready.
 
+## Quick start
+
+```ts
+import { createTrailGateServer, generateSigningKeyPair } from '@trailgate/server';
+
+const tg = createTrailGateServer({
+  issuer: 'https://your-site.example.com',
+  signingKeys: [{ privateJwk: generateSigningKeyPair().privateJwk }],
+  permissions: ['tg.album.read'],
+  resourceOwners: { ownerOf: async (sel) => lookupOwner(sel) },
+});
+
+// Wire the protocol endpoints on your routes (see INTEGRATION.md):
+// GET  /.well-known/trailgate   -> tg.discoveryDocument()
+// POST /tg/grant-request        -> tg.handleGrantRequest(req)
+// POST /tg/grant-redemption     -> tg.handleRedemption(req)
+// GET  /tg/grant-status         -> tg.handleStatus(req)
+// Consent page                  -> tg.getConsent(id), tg.decideConsent(id, decision, userId)
+
+const readAlbum = tg.protect(
+  { permission: 'tg.album.read', resource: (req) => selectorFor(req) },
+  async (req, ctx) => ({ status: 200, body: await loadAlbum(ctx) }),
+);
+```
+
+A runnable host application lives in `examples/photo-host.ts` and the full
+HTTP lifecycle is exercised in `src/host.test.ts`. Both are independent of
+ExampleShop.
+
 ## What it does
 
 The SDK composes the verification pipeline in `@trailgate/core` with the server-side flows the spec assigns to the website:

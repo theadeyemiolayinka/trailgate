@@ -76,6 +76,12 @@ export interface TrailGateServerOptions {
   permissions: readonly string[];
   /** Constraint types this site evaluates; defaults to all registered types. */
   constraintTypes?: readonly string[];
+  /**
+   * Protocol versions this deployment serves; advertised in discovery and
+   * enforced at grant-request intake and request verification. Must be a
+   * subset of the versions this SDK implements. Defaults to `["0.1"]`.
+   */
+  protocolVersions?: readonly string[];
   /** Endpoint paths relative to `issuer`. Defaults shown in the integration guide. */
   paths?: Partial<{
     grantRequest: string;
@@ -196,6 +202,27 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     );
   }
 
+  const protocolVersions = options.protocolVersions ?? SUPPORTED_PROTOCOL_VERSIONS;
+  if (
+    protocolVersions.length === 0 ||
+    protocolVersions.some((v) => !(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(v))
+  ) {
+    throw new TrailGateError(
+      Codes.INTERNAL_ERROR,
+      'protocolVersions must be a non-empty subset of the versions this SDK implements',
+    );
+  }
+
+  const paths = { ...DEFAULT_PATHS, ...(options.paths ?? {}) };
+  for (const [name, path] of Object.entries(paths)) {
+    if (!path.startsWith('/') || path.includes('://') || path.includes(' ')) {
+      throw new TrailGateError(
+        Codes.INTERNAL_ERROR,
+        `paths.${name} must be a path on the issuer origin (start with /)`,
+      );
+    }
+  }
+
   const clock = options.clock ?? systemClock;
   const stores: ServerStores = {
     grantRequests: options.stores?.grantRequests ?? createInMemoryGrantRequestStore(),
@@ -220,7 +247,7 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     signingKeys,
     permissions: options.permissions,
     constraintTypes: options.constraintTypes ?? REGISTERED_CONSTRAINT_TYPES,
-    paths: { ...DEFAULT_PATHS, ...(options.paths ?? {}) },
+    paths,
     capabilities,
     discoveryExtensions: options.discoveryExtensions ?? {},
     stores,
@@ -230,7 +257,7 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     grantRequestTtlSeconds: grantRequestTtl,
     defaultGrantSeconds: options.defaultGrantSeconds ?? DEFAULT_GRANT_LIFETIME_SECONDS,
     reservationTtlSeconds: options.reservationTtlSeconds ?? DEFAULT_RESERVATION_TTL_SECONDS,
-    supportedProtocolVersions: SUPPORTED_PROTOCOL_VERSIONS,
+    supportedProtocolVersions: protocolVersions,
     ...(options.policy !== undefined ? { policy: options.policy } : {}),
     ...(options.resourceOwners !== undefined ? { resourceOwners: options.resourceOwners } : {}),
     ...(options.resourcePolicy !== undefined ? { resourcePolicy: options.resourcePolicy } : {}),

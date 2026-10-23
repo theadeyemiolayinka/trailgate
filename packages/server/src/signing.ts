@@ -1,4 +1,4 @@
-import { createPrivateKey, type JsonWebKey } from 'node:crypto';
+import { createPrivateKey, generateKeyPairSync, type JsonWebKey } from 'node:crypto';
 import type { Jwk, JwtAlgorithm, Money, ReceiptPayload } from '@trailgate/core';
 import {
   buildReceiptPayload,
@@ -105,6 +105,27 @@ export async function issueReceipt(
     alg: key.alg,
   });
   return { token, payload };
+}
+
+/**
+ * Generates a site signing keypair for development and evaluation.
+ * `privateJwk` goes to the `signingKeys` config option and must stay
+ * server-side; `publicJwk` is what discovery publishes. Production
+ * deployments should source keys from their KMS or secret store and pass
+ * `SiteSigningKeyInput` directly.
+ */
+export function generateSigningKeyPair(alg: JwtAlgorithm = 'EdDSA'): {
+  publicJwk: Jwk;
+  privateJwk: Jwk;
+} {
+  const { publicKey, privateKey } =
+    alg === 'EdDSA'
+      ? generateKeyPairSync('ed25519')
+      : generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  return {
+    publicJwk: publicKey.export({ format: 'jwk' }) as JsonWebKey as Jwk,
+    privateJwk: privateKey.export({ format: 'jwk' }) as JsonWebKey as Jwk,
+  };
 }
 
 /** Convenience guard used at configuration time. */
