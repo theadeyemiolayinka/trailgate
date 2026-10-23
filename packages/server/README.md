@@ -2,7 +2,7 @@
 
 Reusable SDK for websites implementing TrailGate: discovery endpoint, consent and grant endpoints, grant lifecycle (issue, refresh, revoke, expire), policy integration, audit hooks, and authoritative constraint enforcement.
 
-Owner: D1.
+Owner: D1 (see `internal/TEAM.md`).
 
 Status: scaffolded. Implementation begins in Phase 2 against the contracts frozen in Phase 1.
 

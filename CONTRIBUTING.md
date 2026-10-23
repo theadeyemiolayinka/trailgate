@@ -54,7 +54,7 @@ Copy the scaffold shape used by existing packages: `package.json` with `build`, 
 Any change to a shared interface (wire format, schema, error code, endpoint semantics, public SDK API used by another owner) requires all of:
 
 1. An ADR in `docs/decisions/` describing motivation and alternatives.
-2. Signoff from each affected owner per `TEAM.md`.
+2. Signoff from each affected owner per `internal/TEAM.md`.
 3. Spec, schemas, examples, conformance vectors, and tests updated in the same change.
 
 If a contract you need is missing or ambiguous, raise it to D0 before inventing an interface.

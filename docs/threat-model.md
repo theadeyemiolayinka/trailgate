@@ -1,6 +1,6 @@
 # Threat model
 
-Status: analysis only. None of the mitigations below are implemented yet. The phase column shows where each is expected to land per `PHASES.md`.
+Status: analysis only. None of the mitigations below are implemented yet. The phase column shows where each is expected to land per `internal/PHASES.md`.
 
 ## Assets
 

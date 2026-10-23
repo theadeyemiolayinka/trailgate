@@ -1,6 +1,6 @@
 # TrailGate specification
 
-This directory holds the language-neutral protocol specification. Nothing here is normative yet; content lands in Phase 1 per `PHASES.md`.
+This directory holds the language-neutral protocol specification. Nothing here is normative yet; content lands in Phase 1 per `internal/PHASES.md`.
 
 Planned contents:
 
@@ -18,4 +18,4 @@ Protocol and SDK errors carry a stable, machine-readable code plus a human-reada
 
 - Spec changes follow the process in `docs/decisions/0002-protocol-decision-and-versioning-process.md`.
 - The spec must not depend on this repository layout, ExampleShop, or MCP.
-- Owner: D0.
+- Owner: D0 (see `internal/TEAM.md`).

@@ -2,7 +2,7 @@
 
 Optional MCP integration for agent runtimes, built on `@trailgate/agent`.
 
-Owner: D2.
+Owner: D2 (see `internal/TEAM.md`).
 
 Status: scaffolded. Implementation lands in Phase 4.
 

@@ -2,7 +2,7 @@
 
 Client SDK for agents using TrailGate: site discovery, grant status, key management, consent initiation, signed requests, and receipt verification.
 
-Owner: D2.
+Owner: D2 (see `internal/TEAM.md`).
 
 Status: scaffolded. Implementation begins in Phase 2 against the contracts frozen in Phase 1.
 

@@ -5,4 +5,4 @@ maintainers choose and apply a license, all rights are reserved and this
 code may not be copied, modified, or redistributed.
 
 The license decision is tracked as an open item for Phase 5
-(see PHASES.md) and will be recorded in docs/decisions/ once made.
+(see internal/PHASES.md) and will be recorded in docs/decisions/ once made.

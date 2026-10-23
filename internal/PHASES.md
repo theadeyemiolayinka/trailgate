@@ -1,6 +1,6 @@
 # Phases
 
-Staged build plan. A phase is complete when its deliverables are merged and its quality gates pass. Every phase requires `pnpm verify` green, ADRs for contract changes, and documentation kept in sync with code.
+Staged build plan. A phase is complete when its deliverables are merged and its quality gates pass. Every phase requires `pnpm verify` green, ADRs for contract changes, and documentation kept in sync with code. Workstream codes (D0 to D3) are defined in `TEAM.md`.
 
 Cross-cutting rule: shared interfaces are agreed before independent implementations depend on them. If a needed contract is missing or ambiguous, the responsible owner raises it to D0 before inventing one.
 

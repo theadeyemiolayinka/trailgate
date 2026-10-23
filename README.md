@@ -26,6 +26,7 @@ The repository currently contains the development foundation only: workspace str
 | `apps/example-shop/` | Ecommerce reference application with consent UX and simulated wallet. |
 | `tests/` | Integration, security, adversarial, and interoperability suites. |
 | `scripts/` | Development and reproducible demo scripts. |
+| `internal/` | Team collaboration docs: roster, phases. Not protocol documentation. |
 
 ## Getting started
 
@@ -54,8 +55,8 @@ pnpm verify
 ## Development
 
 - `CONTRIBUTING.md`: workflow, commit style, code conventions, quality gates.
-- `TEAM.md`: workstream ownership and interface rules.
-- `PHASES.md`: staged build plan and integration milestones.
+- `internal/TEAM.md`: workstream ownership and interface rules.
+- `internal/PHASES.md`: staged build plan and integration milestones.
 - `docs/architecture.md`: components and trust boundaries.
 - `docs/threat-model.md`: assets, attackers, surfaces, mitigations, open risks.
 - `docs/decisions/`: architecture decision records.
