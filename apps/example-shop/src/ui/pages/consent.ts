@@ -87,7 +87,15 @@ function permissionLabel(permission: string): string {
  * verbatim from the stored grant request, then the effective scope the shop
  * will actually issue when it differs.
  */
-export function renderConsent(ctx: RenderCtx, view: ConsentView): string {
+export function renderConsent(
+  ctx: RenderCtx,
+  view: ConsentView,
+  site: {
+    name: string;
+    issuer: string;
+    spendingPolicy: { maxCharge: Money; maxGrantBudget: Money };
+  },
+): string {
   const { requested, effective } = view;
   const narrowed =
     effective.permissions.length !== requested.permissions.length ||
@@ -96,6 +104,14 @@ export function renderConsent(ctx: RenderCtx, view: ConsentView): string {
     JSON.stringify(effective.constraints) !== JSON.stringify(requested.constraints);
 
   const decided = view.status !== 'pending';
+  const denyCopy = `<div class="consent-term">
+      <h3>If you deny</h3>
+      <p>Denying records the decision, closes this request, and issues nothing. The agent is informed the request was denied and cannot redeem it. Your cart, orders, and wallet are untouched.</p>
+    </div>
+    <div class="consent-term">
+      <h3>When more approval is needed</h3>
+      <p>Approving creates one grant carrying exactly these terms. If the agent later wants more (new permissions, resources, or higher limits) it must submit a new request and you must approve again — it cannot widen this grant. Revoking stops everything from the next request onward.</p>
+    </div>`;
   const redirectNote =
     view.redirectUri !== undefined
       ? `<p class="consent-note">After your decision you will be returned to the agent at <span class="mono-id">${esc(view.redirectUri)}</span>.</p>`
@@ -138,9 +154,24 @@ export function renderConsent(ctx: RenderCtx, view: ConsentView): string {
 
   <div class="consent-terms">
     <div class="consent-term">
-      <h3>Agent key</h3>
-      <p class="mono-id">${esc(view.agentJkt)}</p>
-      <p class="faint" style="margin:0">The grant will be bound to this key; only requests signed by it can use the grant.</p>
+      <h3>Site granting access</h3>
+      <p><strong>${esc(site.name)}</strong> <span class="mono-id">${esc(site.issuer)}</span></p>
+      <p class="faint" style="margin:0">The grant, receipts, and spending ledger are issued and enforced by this origin only.</p>
+    </div>
+    <div class="consent-term">
+      <h3>Agent being authorized</h3>
+      <dl class="dl">
+        <dt>Key thumbprint</dt><dd><span class="mono-id">${esc(view.agentJkt)}</span></dd>
+      </dl>
+      <p class="faint" style="margin:0">Verified by the protocol: the grant binds to this exact key, and every request must be signed by its private half. Draft 0.1 carries no verified agent name or vendor claim — anything the agent says about itself is descriptive, not verified identity.</p>
+    </div>
+    <div class="consent-term panel-sunken">
+      <h3>Site spending policy</h3>
+      <ul>
+        <li>any single charge is capped at <strong>${esc(formatMoneyWithCurrency(site.spendingPolicy.maxCharge))}</strong></li>
+        <li>a grant's total budget is capped at <strong>${esc(formatMoneyWithCurrency(site.spendingPolicy.maxGrantBudget))}</strong> even if more is requested</li>
+        <li>currency: <strong>${esc(site.spendingPolicy.maxCharge.currency)}</strong> only</li>
+      </ul>
     </div>
     <div class="consent-term">
       <h3>Permissions requested</h3>
@@ -164,6 +195,7 @@ export function renderConsent(ctx: RenderCtx, view: ConsentView): string {
       <p class="faint" style="margin:0">This request expires ${esc(formatTime(view.expiresAt))} if undecided. You can revoke an issued grant at any time from Agent connections.</p>
     </div>
     ${effectiveBlock}
+    ${denyCopy}
   </div>
 
   ${decidedBlock}

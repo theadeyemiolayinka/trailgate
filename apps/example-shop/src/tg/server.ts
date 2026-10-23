@@ -4,6 +4,8 @@ import type { TrailGateServer } from '@trailgate/server';
 import { createTrailGateServer, generateSigningKeyPair } from '@trailgate/server';
 import type { ShopConfig } from '../config.ts';
 import type { Db } from '../db/database.ts';
+import type { ShopPolicy } from '../policy.ts';
+import { SHOP_POLICY } from '../policy.ts';
 import type { SqliteAuditSink } from './stores.ts';
 import {
   createAgentKeyDirectory,
@@ -74,6 +76,8 @@ function ownerOf(db: Db, selector: string): string | undefined {
 export interface ShopTrailGate {
   tg: TrailGateServer;
   audit: SqliteAuditSink;
+  /** Server-authoritative spending policy shown to users and enforced at intake and charge time. */
+  spendingPolicy: ShopPolicy;
 }
 
 /**
@@ -115,6 +119,24 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
         );
       }
     },
+    refineScope: (requested) => ({
+      permissions: [...requested.permissions],
+      resources: [...requested.resources],
+      // Site policy ceiling: a cumulative_budget above the shop maximum is
+      // tightened to the maximum, never loosened (spec section 9.3).
+      constraints: requested.constraints.map((c) =>
+        c.type === 'cumulative_budget' &&
+        typeof c.params?.['amount'] === 'number' &&
+        c.params['amount'] > config.maxGrantBudgetMinor &&
+        c.params['currency'] === config.policyCurrency
+          ? {
+              type: c.type,
+              params: { ...c.params, amount: config.maxGrantBudgetMinor },
+            }
+          : c,
+      ),
+      lifetimeSeconds: requested.requestedSeconds ?? 3600,
+    }),
     policy: {
       authorize: async (ctx) => {
         if (ctx.subject !== undefined) {
@@ -135,5 +157,13 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
       },
     },
   });
-  return { tg, audit };
+  return {
+    tg,
+    audit,
+    spendingPolicy: {
+      maxCharge: { amount: config.maxChargeMinor, currency: config.policyCurrency },
+      maxGrantBudget: { amount: config.maxGrantBudgetMinor, currency: config.policyCurrency },
+      currency: config.policyCurrency,
+    },
+  };
 }

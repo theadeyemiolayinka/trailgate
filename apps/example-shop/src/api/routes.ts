@@ -107,6 +107,43 @@ function bodyObject(req: HostRequest): Record<string, unknown> {
   throw new TrailGateError(Codes.REQUEST_MALFORMED, 'request body must be a json object');
 }
 
+/**
+ * Persists the signed receipt a protected response carries (spec section
+ * 14) so users can inspect issued receipts later. The payload is decoded
+ * unverified for indexing only; display-time verification runs against
+ * `verifyReceipt` with the real signing keys.
+ */
+function captureReceipt(db: Db, req: HostRequest, res: HostResponse): void {
+  const token = res.headers?.['trailgate-receipt'];
+  if (typeof token !== 'string') {
+    return;
+  }
+  try {
+    const payload = decodeCompactJws(token).payload as {
+      jti?: string;
+      tg?: { grant_id?: string; decision?: string; code?: string };
+    };
+    if (typeof payload.tg?.grant_id !== 'string' || typeof payload.tg.decision !== 'string') {
+      return;
+    }
+    db.prepare(
+      `INSERT INTO tg_receipts (id, grant_id, decision, code, receipt_jws, method, target, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      payload.jti ?? `rcp_${Date.now()}`,
+      payload.tg.grant_id,
+      payload.tg.decision,
+      payload.tg.code ?? null,
+      token,
+      req.method.toUpperCase(),
+      new URL(req.url).pathname,
+      Math.floor(Date.now() / 1000),
+    );
+  } catch {
+    // Receipt persistence is best-effort; a malformed receipt still reaches the agent.
+  }
+}
+
 function requireSubject(ctx: EnforcementContext): string {
   if (ctx.subject === undefined) {
     throw new TrailGateError(
@@ -174,6 +211,7 @@ function orderView(db: Db, orderId: string): unknown {
 export function createAgentApi(
   db: Db,
   tg: TrailGateServer,
+  spendingPolicy: { maxCharge: { amount: number; currency: string } },
 ): { dispatch: (req: HostRequest) => Promise<HostResponse | undefined> } {
   const routes: ApiRoute[] = [
     {
@@ -380,6 +418,14 @@ export function createAgentApi(
           if (order === undefined || order.userId !== subject) {
             return err(404, 'shop.order.not_found', 'unknown order');
           }
+          // Site spending policy: per-charge cap enforced server-side.
+          if (order.total.amount > spendingPolicy.maxCharge.amount) {
+            return err(
+              403,
+              'shop.policy.max_charge',
+              `order total exceeds the site maximum charge of ${spendingPolicy.maxCharge.amount} ${spendingPolicy.maxCharge.currency}`,
+            );
+          }
           try {
             payOrder(db, id, subject);
           } catch (e) {
@@ -455,7 +501,9 @@ export function createAgentApi(
         }
         if (matchPath(route.segments, path) !== undefined) {
           try {
-            return await route.handle(req);
+            const res = await route.handle(req);
+            captureReceipt(db, req, res);
+            return res;
           } catch (e) {
             if (e instanceof TrailGateError) {
               return json(e.httpStatus, {

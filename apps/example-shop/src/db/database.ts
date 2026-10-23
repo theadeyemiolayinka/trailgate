@@ -232,6 +232,22 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    id: 4,
+    sql: `
+      CREATE TABLE tg_receipts (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL,
+        decision TEXT NOT NULL CHECK (decision IN ('allowed','denied')),
+        code TEXT,
+        receipt_jws TEXT NOT NULL,
+        method TEXT NOT NULL,
+        target TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_tg_receipts_grant ON tg_receipts(grant_id, created_at);
+    `,
+  },
 ];
 
 export function migrate(db: Db): void {

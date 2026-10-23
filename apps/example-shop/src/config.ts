@@ -22,6 +22,16 @@ export interface ShopConfig {
   seed: boolean;
   /** Directory holding dev CA + server certificate. */
   certsDir: string;
+  /**
+   * Site spending policy (server-authoritative, minor units of
+   * `policyCurrency`): the largest single wallet charge the shop will
+   * execute for any caller, and the largest cumulative budget it will let
+   * a grant carry. Communicated on the consent page; enforced at intake
+   * (`refineScope` tightens budgets) and at charge time.
+   */
+  maxChargeMinor: number;
+  maxGrantBudgetMinor: number;
+  policyCurrency: string;
 }
 
 const appRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -53,5 +63,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ShopConfig {
     dbPath: env['SHOP_DB'] ?? join(appRoot, 'data', 'example-shop.db'),
     seed: env['SHOP_SEED'] !== '0',
     certsDir: env['SHOP_CERTS_DIR'] ?? join(appRoot, 'dev-certs'),
+    maxChargeMinor: intFromEnv('SHOP_MAX_CHARGE_MINOR', 10_000),
+    maxGrantBudgetMinor: intFromEnv('SHOP_MAX_GRANT_BUDGET_MINOR', 50_000),
+    policyCurrency: 'USD',
   };
 }

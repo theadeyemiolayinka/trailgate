@@ -23,6 +23,9 @@ function makeApp(): ShopApp {
     dbPath: ':memory:',
     seed: false,
     certsDir: 'nowhere',
+    maxChargeMinor: 10_000,
+    maxGrantBudgetMinor: 50_000,
+    policyCurrency: 'USD',
   };
   return createShopApp(db, config);
 }
@@ -336,4 +339,80 @@ test('protected api denies unsigned requests', async () => {
   assert.equal(res.status, 400);
   const parsed = JSON.parse(text(res)) as { error: { code: string } };
   assert.equal(parsed.error.code, Codes.REQUEST_MALFORMED);
+});
+
+test('receipts: captured, verified, and tampered detection', async () => {
+  const app = makeApp();
+  const db = app.db;
+  const transport = inProcessTransport(app);
+  const client = createAgentClient({ transport });
+  client.useKey(SoftwareKeyProvider.generate());
+  const site = await client.discover(ISSUER);
+
+  const session = await client.requestGrant(site, {
+    permissions: ['tg.catalog.read'],
+    resources: [],
+    constraints: [],
+  });
+  await app.tg.tg.decideConsent(session.requestId, 'approve', 'usr_demo');
+  await client.awaitApproval(session.requestId, { intervalMs: 10 });
+
+  const res = await client.fetchProtected(site, { method: 'GET', target: '/api/products' });
+  assert.equal(res.status, 200);
+  assert.equal(res.receipt?.verified, true);
+
+  const stored = db
+    .prepare(
+      'SELECT grant_id, decision, receipt_jws FROM tg_receipts ORDER BY created_at DESC LIMIT 1',
+    )
+    .get() as { grant_id: string; decision: string; receipt_jws: string } | undefined;
+  assert.ok(stored !== undefined);
+  assert.equal(stored.decision, 'allowed');
+
+  // Site-side verification of the stored token.
+  const { verifyReceipt } = await import('@trailgate/core');
+  const verified = await verifyReceipt(stored.receipt_jws, {
+    resolveSiteKey: {
+      resolve: async (kid: string) =>
+        app.tg.tg.config.signingKeys.find((k) => k.kid === kid)?.publicJwk,
+    },
+    issuer: ISSUER,
+    audience: ISSUER,
+  });
+  assert.equal(verified.tg.decision, 'allowed');
+
+  // A tampered token must not verify.
+  const tampered = `${stored.receipt_jws.slice(0, -4)}AAAA`;
+  await assert.rejects(() =>
+    verifyReceipt(tampered, {
+      resolveSiteKey: {
+        resolve: async (kid: string) =>
+          app.tg.tg.config.signingKeys.find((k) => k.kid === kid)?.publicJwk,
+      },
+      issuer: ISSUER,
+      audience: ISSUER,
+    }),
+  );
+});
+
+test('spending policy: cumulative budgets are tightened to the site ceiling', async () => {
+  const app = makeApp();
+  const transport = inProcessTransport(app);
+  const client = createAgentClient({ transport });
+  client.useKey(SoftwareKeyProvider.generate());
+  const site = await client.discover(ISSUER);
+
+  const session = await client.requestGrant(site, {
+    permissions: ['tg.wallet.charge'],
+    resources: [],
+    constraints: [{ type: 'cumulative_budget', params: { amount: 999_999, currency: 'USD' } }],
+  });
+  const view = await app.tg.tg.getConsent(session.requestId);
+  assert.ok(view !== undefined);
+  const budget = view.effective.constraints.find((c) => c.type === 'cumulative_budget');
+  assert.ok(budget !== undefined && budget.params !== undefined);
+  assert.equal(
+    (budget.params as { amount: number }).amount,
+    app.tg.spendingPolicy.maxGrantBudget.amount,
+  );
 });

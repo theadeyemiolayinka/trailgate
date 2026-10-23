@@ -1,4 +1,4 @@
-import { isTrailGateError } from '@trailgate/core';
+import { isTrailGateError, verifyReceipt } from '@trailgate/core';
 import type { HostRequest, HostResponse } from '@trailgate/server';
 import { createAgentApi } from './api/routes.ts';
 import type { ShopConfig } from './config.ts';
@@ -53,12 +53,19 @@ import {
   type GrantRequestView,
   type IssuedGrantView,
   renderConnections,
+  renderGrantDetail,
 } from './ui/pages/connections.ts';
 import { renderConsent } from './ui/pages/consent.ts';
 import { renderHome } from './ui/pages/home.ts';
 import { renderInvoice } from './ui/pages/invoice.ts';
 import { renderOrderDetail, renderOrderList } from './ui/pages/orders.ts';
 import { renderProduct } from './ui/pages/product.ts';
+import {
+  type ReceiptVerdict,
+  renderReceiptDetail,
+  renderReceiptList,
+  type StoredReceiptRow,
+} from './ui/pages/receipts.ts';
 import { renderWallet } from './ui/pages/wallet.ts';
 import type { RenderCtx } from './ui/render.ts';
 
@@ -171,7 +178,7 @@ function render(
 export function createShopApp(db: Db, config: ShopConfig): ShopApp {
   const tg = createShopTrailGate(db, config);
   const ctx: Ctx = { db, config, tg };
-  const api = createAgentApi(db, tg.tg);
+  const api = createAgentApi(db, tg.tg, tg.spendingPolicy);
   const router = buildRoutes(ctx);
 
   return {
@@ -264,6 +271,17 @@ function nextPath(req: AppRequest, form: Record<string, string>): string {
     return next;
   }
   return req.url.searchParams.get('next') ?? '/';
+}
+
+function siteIdentity(ctx: Ctx) {
+  return {
+    name: 'ExampleShop',
+    issuer: ctx.config.issuer,
+    spendingPolicy: {
+      maxCharge: ctx.tg.spendingPolicy.maxCharge,
+      maxGrantBudget: ctx.tg.spendingPolicy.maxGrantBudget,
+    },
+  };
 }
 
 function buildRoutes(ctx: Ctx): Router {
@@ -777,7 +795,202 @@ function buildRoutes(ctx: Ctx): Router {
             : 'revoked from account page',
         actor: `user:${user.id}`,
       });
-      return redirect('/account/connections');
+      // Redirect to the detail page, which re-reads the stored record and
+      // shows the actual persisted status rather than optimistic UI state.
+      return redirect(`/account/connections/${jti}`);
+    }),
+  );
+
+  const grantViewOf = (row: {
+    jti: string;
+    agent_jkt: string;
+    issued_at: number;
+    expires_at: number;
+    status: 'active' | 'revoked';
+    request_id: string;
+    revoked_at: number | null;
+    revocation_reason: string | null;
+    revocation_actor: string | null;
+  }): IssuedGrantView => {
+    const reqRow = db
+      .prepare(
+        'SELECT effective_permissions, effective_resources, effective_constraints FROM tg_grant_requests WHERE request_id = ?',
+      )
+      .get(row.request_id) as
+      | {
+          effective_permissions: string | null;
+          effective_resources: string | null;
+          effective_constraints: string | null;
+        }
+      | undefined;
+    const jsonField = (value: string | null | undefined): unknown[] =>
+      value === null || value === undefined ? [] : (JSON.parse(value) as unknown[]);
+    return {
+      jti: row.jti,
+      agentJkt: row.agent_jkt,
+      issuedAt: row.issued_at,
+      expiresAt: row.expires_at,
+      status: row.status,
+      permissions: jsonField(reqRow?.effective_permissions) as string[],
+      resources: jsonField(reqRow?.effective_resources) as string[],
+      constraints: jsonField(reqRow?.effective_constraints) as IssuedGrantView['constraints'],
+      ...(row.revoked_at !== null ? { revokedAt: row.revoked_at } : {}),
+      ...(row.revocation_reason !== null ? { revocationReason: row.revocation_reason } : {}),
+      ...(row.revocation_actor !== null ? { revocationActor: row.revocation_actor } : {}),
+    };
+  };
+
+  router.get(
+    '/account/connections/:jti',
+    authed(async (req, user) => {
+      const jti = req.params['jti'] as string;
+      const row = db.prepare('SELECT * FROM tg_grants WHERE jti = ?').get(jti) as
+        | {
+            jti: string;
+            agent_jkt: string;
+            issued_at: number;
+            expires_at: number;
+            status: 'active' | 'revoked';
+            request_id: string;
+            subject: string | null;
+            revoked_at: number | null;
+            revocation_reason: string | null;
+            revocation_actor: string | null;
+          }
+        | undefined;
+      if (row === undefined || row.subject !== user.id) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      const grant = grantViewOf(row);
+      const budgets = grant.constraints
+        .filter((c) => c.type === 'cumulative_budget')
+        .map((c) => c.params as { amount: number; currency: string });
+      const consumed = await ctx.tg.tg.config.stores.ledger.consumedMinorUnits(
+        jti,
+        ctx.tg.spendingPolicy.currency,
+      );
+      const reserved = await ctx.tg.tg.config.stores.ledger.reservedMinorUnits(
+        jti,
+        ctx.tg.spendingPolicy.currency,
+      );
+      const receipts = db
+        .prepare(
+          'SELECT id, decision, target, method, created_at FROM tg_receipts WHERE grant_id = ? ORDER BY created_at DESC LIMIT 50',
+        )
+        .all(jti) as {
+        id: string;
+        decision: string;
+        target: string;
+        method: string;
+        created_at: number;
+      }[];
+      return render(ctx, req, {
+        title: `Grant ${jti}`,
+        section: 'account',
+        body: renderGrantDetail(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          grant,
+          { consumed, reserved, budgets },
+          ctx.tg.audit.listForGrant(jti),
+          receipts,
+        ),
+      });
+    }),
+  );
+
+  router.get(
+    '/account/receipts',
+    authed((req, user) => {
+      const rows = db
+        .prepare(
+          `SELECT r.id, r.grant_id, r.decision, r.code, r.method, r.target, r.created_at
+           FROM tg_receipts r JOIN tg_grants g ON g.jti = r.grant_id
+           WHERE g.subject = ? ORDER BY r.created_at DESC LIMIT 200`,
+        )
+        .all(user.id) as unknown as StoredReceiptRow[];
+      return render(ctx, req, {
+        title: 'Receipts',
+        section: 'account',
+        body: renderReceiptList(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          rows,
+        ),
+      });
+    }),
+  );
+
+  const siteKeyResolver = {
+    resolve: async (kid: string) =>
+      ctx.tg.tg.config.signingKeys.find((k) => k.kid === kid)?.publicJwk,
+  };
+  const verify = async (token: string): Promise<ReceiptVerdict> => {
+    try {
+      const payload = await verifyReceipt(token, {
+        resolveSiteKey: siteKeyResolver,
+        issuer: ctx.config.issuer,
+        audience: ctx.config.issuer,
+      });
+      return { kind: 'verified', payload };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        kind: msg.includes('json') || msg.includes('compact') ? 'malformed' : 'unverified',
+        reason: msg,
+      };
+    }
+  };
+
+  router.get(
+    '/account/receipts/:id',
+    authed(async (req, user) => {
+      const id = req.params['id'] as string;
+      const row = db
+        .prepare(
+          `SELECT r.* FROM tg_receipts r JOIN tg_grants g ON g.jti = r.grant_id
+           WHERE r.id = ? AND g.subject = ?`,
+        )
+        .get(id, user.id) as (StoredReceiptRow & { receipt_jws: string }) | undefined;
+      if (row === undefined) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      const verdict = await verify(row.receipt_jws);
+      return render(ctx, req, {
+        title: `Receipt ${id}`,
+        section: 'account',
+        body: renderReceiptDetail(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          verdict,
+          row.receipt_jws,
+          {
+            grant_id: row.grant_id,
+            method: row.method,
+            target: row.target,
+            created_at: row.created_at,
+          },
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/account/receipts/verify',
+    authed(async (req, _user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const token = (form['receipt'] ?? '').trim();
+      const verdict =
+        token === ''
+          ? ({ kind: 'malformed', reason: 'no token provided' } as ReceiptVerdict)
+          : await verify(token);
+      return render(ctx, req, {
+        title: 'Verify a receipt',
+        section: 'account',
+        body: renderReceiptDetail(
+          { ...(req.session !== undefined ? { session: req.session } : {}) },
+          verdict,
+          token,
+        ),
+      });
     }),
   );
 
@@ -832,6 +1045,7 @@ function buildRoutes(ctx: Ctx): Router {
             ...(req.session !== undefined ? { session: req.session } : {}),
           },
           view,
+          siteIdentity(ctx),
         ),
       });
     }),
@@ -866,6 +1080,7 @@ function buildRoutes(ctx: Ctx): Router {
                       ...(req.session !== undefined ? { session: req.session } : {}),
                     },
                     view,
+                    siteIdentity(ctx),
                   ),
             flash: { kind: 'error', text: err.message },
           });

@@ -9,6 +9,7 @@ export function accountNav(section: string): string {
     ['/account/addresses', 'Addresses', 'addresses'],
     ['/account/wallet', 'Wallet', 'wallet'],
     ['/account/connections', 'Agent connections', 'connections'],
+    ['/account/receipts', 'Receipts', 'receipts'],
     ['/account/activity', 'Activity', 'activity'],
   ];
   const links = items
