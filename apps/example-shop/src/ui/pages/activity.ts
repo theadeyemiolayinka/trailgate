@@ -1,7 +1,7 @@
 import type { AuditEvent } from '@trailgate/core';
 import type { Order } from '../../domain/orders.ts';
 import { esc, formatTime } from '../html.ts';
-import { statusBadge } from '../layout.ts';
+import { emptyState, pageHead, price, statusBadge } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';
 import { accountNav } from './account.ts';
 
@@ -48,7 +48,7 @@ export function renderActivity(
   const audit =
     auditRows.length === 0
       ? '<p class="muted">No recorded agent activity yet. Events appear here when an agent request is decided and used.</p>'
-      : `<table class="table">
+      : `<div class="table-wrap"><table class="table">
           <thead><tr><th>When</th><th>Event</th><th>Detail</th></tr></thead>
           <tbody>${auditRows
             .map(
@@ -59,32 +59,34 @@ export function renderActivity(
               </tr>`,
             )
             .join('')}</tbody>
-        </table>`;
+        </table></div>`;
   const orders =
     agentOrders.length === 0
-      ? '<p class="muted">No orders have been placed by an agent.</p>'
-      : `<table class="table">
+      ? emptyState(
+          'No agent orders',
+          'Orders an agent places under a grant you approved appear here.',
+        )
+      : `<table class="table table-cards">
           <thead><tr><th>Order</th><th>Placed</th><th class="num">Total</th><th>Status</th><th>Grant</th></tr></thead>
           <tbody>${agentOrders
             .map(
               (order) => `<tr>
-                <td><a href="/orders/${esc(order.id)}">${esc(order.id)}</a></td>
-                <td>${esc(formatTime(order.createdAt))}</td>
-                <td class="num">${order.total.amount} ${esc(order.total.currency)}</td>
-                <td>${statusBadge(order.status)}</td>
-                <td><span class="mono-id">${esc(order.grantJti ?? '')}</span></td>
+                <td data-label="Order"><a href="/orders/${esc(order.id)}">${esc(order.id)}</a></td>
+                <td data-label="Placed">${esc(formatTime(order.createdAt))}</td>
+                <td data-label="Total" class="num">${price(order.total)}</td>
+                <td data-label="Status">${statusBadge(order.status)}</td>
+                <td data-label="Grant"><span class="mono-id">${esc(order.grantJti ?? '')}</span></td>
               </tr>`,
             )
             .join('')}</tbody>
         </table>`;
   return `
-<div class="page-head"><div><span class="eyebrow">Account / Activity</span><h1>Activity</h1></div></div>
+${pageHead('Account', 'Authorization activity', 'Append-only protocol events recorded by the shop for your grants. Receipts returned to agents reference these records.')}
 <div class="account-grid">
   ${accountNav('activity')}
   <div>
     <section class="section">
       <div class="section-head"><h3>TrailGate audit events</h3></div>
-      <p class="faint">Append-only protocol events recorded by the shop for your grants. Receipts returned to agents reference these records.</p>
       ${audit}
     </section>
     <section class="section">

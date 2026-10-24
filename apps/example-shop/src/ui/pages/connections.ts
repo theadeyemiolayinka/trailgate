@@ -1,6 +1,6 @@
 import type { AuditEvent, Constraint } from '@trailgate/core';
 import { esc, formatTime } from '../html.ts';
-import { csrfField, statusBadge } from '../layout.ts';
+import { csrfField, emptyState, pageHead, statusBadge } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';
 import { accountNav } from './account.ts';
 import { describeConstraint } from './consent.ts';
@@ -45,7 +45,7 @@ export function renderConnections(
   }
   const grantPanel = (grant: IssuedGrantView): string => {
     const perms = grant.permissions
-      .map((p) => `<li><span class="mono">${esc(p)}</span></li>`)
+      .map((p) => `<li>${esc(PERM_COPY[p] ?? p)} <span class="row-sub mono">${esc(p)}</span></li>`)
       .join('');
     const resources =
       grant.resources.length === 0
@@ -62,7 +62,7 @@ export function renderConnections(
                     <input type="hidden" name="reason" value="revoked from account page">
                     <button class="button button-danger button-small" type="submit">Revoke</button>
                   </form>`
-        : `<p class="faint">Revoked ${grant.revokedAt !== undefined ? esc(formatTime(grant.revokedAt)) : ''}${grant.revocationReason !== undefined ? ` · ${esc(grant.revocationReason)}` : ''}</p>`;
+        : `<p class="faint" style="margin:var(--space-3) 0 0">Revoked ${grant.revokedAt !== undefined ? esc(formatTime(grant.revokedAt)) : ''}${grant.revocationReason !== undefined ? ` · ${esc(grant.revocationReason)}` : ''}</p>`;
     return `<div class="panel">
               <div class="split">
                 <div><a class="mono-id" href="/account/connections/${esc(grant.jti)}">${esc(grant.jti)}</a></div>
@@ -72,7 +72,7 @@ export function renderConnections(
                 <dt>Agent key</dt><dd><span class="mono-id">${esc(grant.agentJkt)}</span></dd>
                 <dt>Issued</dt><dd>${esc(formatTime(grant.issuedAt))}</dd>
                 <dt>Expires</dt><dd>${esc(formatTime(grant.expiresAt))}</dd>
-                <dt>Permissions</dt><dd><ul style="margin:0;padding-left:1.2em">${perms}</ul></dd>
+                <dt>Permissions</dt><dd><ul>${perms}</ul></dd>
                 <dt>Resources</dt><dd>${resources}</dd>
                 <dt>Constraints</dt><dd>${constraints}</dd>
               </dl>
@@ -85,46 +85,60 @@ export function renderConnections(
       : `<div class="section"><div class="section-head"><h3>${esc(title)}</h3></div><div class="stack">${list.map(grantPanel).join('')}</div></div>`;
   const grantRows =
     grants.length === 0
-      ? '<p class="muted">No agent grants yet. An agent that asks for access appears here after you decide.</p>'
+      ? emptyState(
+          'No agent connections',
+          'An agent that asks for access appears here after you decide. Connect one with the TrailGate agent demo.',
+        )
       : section('Active', groups.active) +
         section('Expired', groups.expired) +
         section('Revoked', groups.revoked);
   const requestRows =
     requests.length === 0
       ? '<p class="muted">No consent decisions on record.</p>'
-      : `<table class="table">
+      : `<div class="table-wrap"><table class="table">
           <thead><tr><th>Request</th><th>Agent key</th><th>Permissions</th><th>Decided</th><th>Status</th></tr></thead>
           <tbody>${requests
             .map(
               (req) => `<tr>
                 <td><span class="mono-id">${esc(req.requestId)}</span></td>
                 <td><span class="mono-id" title="${esc(req.agentJkt)}">${esc(req.agentJkt.slice(0, 12))}…</span></td>
-                <td>${req.permissions.map((p) => `<span class="mono">${esc(p)}</span>`).join(', ')}</td>
+                <td><span class="mono">${esc(req.permissions.join(', '))}</span></td>
                 <td>${esc(formatTime(req.createdAt))}</td>
                 <td>${statusBadge(req.status)}</td>
               </tr>`,
             )
             .join('')}</tbody>
-        </table>`;
+        </table></div>`;
+  const userId = ctx.user?.id;
+  const resourceDetails =
+    userId === undefined
+      ? ''
+      : `<details class="tech-details">
+        <summary>Resource names an agent can request</summary>
+        <p>Agents scope grants to named resources. When writing a request, an agent can name:</p>
+        <dl class="dl">
+          <dt>Cart</dt><dd><span class="mono-id">cart:cart_${esc(userId)}</span></dd>
+          <dt>Wallet</dt><dd><span class="mono-id">wallet:wlt_${esc(userId)}</span></dd>
+          <dt>Orders</dt><dd><span class="mono-id">order:ord_*</span> (one selector per order)</dd>
+        </dl>
+      </details>`;
   return `
-<div class="page-head"><div><span class="eyebrow">Account / Connections</span><h1>Agent connections</h1></div></div>
+${pageHead('Account', 'Agent connections', 'Every request an agent makes is checked against an active grant and its constraints. Revoking takes effect on the next request.')}
 <div class="account-grid">
   ${accountNav('connections')}
   <div>
     <section class="section">
       <div class="section-head"><h3>Issued grants</h3></div>
-      <p class="faint">Every request an agent makes carries a grant checked against this list and its constraints. Revoking takes effect on the next request.</p>
-      <div class="stack">${grantRows}</div>
+      ${grantRows}
     </section>
     <section class="section">
       <div class="section-head"><h3>Consent decisions</h3></div>
       ${requestRows}
     </section>
+    ${resourceDetails}
   </div>
 </div>`;
 }
-
-// ---------- Prompt 2 additions: grant detail + grouped rendering ----------
 
 export function renderGrantDetail(
   ctx: RenderCtx,
@@ -136,14 +150,14 @@ export function renderGrantDetail(
   const now = Math.floor(Date.now() / 1000);
   const effective =
     grant.status === 'revoked' ? 'revoked' : grant.expiresAt <= now ? 'expired' : 'active';
-  const scopeRows = `<dt>Permissions</dt><dd><ul style="margin:0;padding-left:1.2em">${grant.permissions
+  const scopeRows = `<dt>Permissions</dt><dd><ul>${grant.permissions
     .map(
       (p) =>
         `<li><span class="mono">${esc(p)}</span> <span class="row-sub">${esc(PERM_COPY[p] ?? '')}</span></li>`,
     )
     .join('')}</ul></dd>
     <dt>Resources</dt><dd>${grant.resources.length === 0 ? '<span class="muted">None requested</span>' : grant.resources.map((r) => `<span class="mono-id">${esc(r)}</span>`).join('<br>')}</dd>
-    <dt>Constraints</dt><dd>${grant.constraints.length === 0 ? '<span class="muted">None</span>' : `<ul style="margin:0;padding-left:1.2em">${grant.constraints.map((c) => `<li>${describeConstraint(c)}</li>`).join('')}</ul>`}</dd>`;
+    <dt>Constraints</dt><dd>${grant.constraints.length === 0 ? '<span class="muted">None</span>' : `<ul>${grant.constraints.map((c) => `<li>${describeConstraint(c)}</li>`).join('')}</ul>`}</dd>`;
   const ledgerRows = `<dt>Spent under grant</dt><dd>${budget.consumed} minor units</dd>
     <dt>Reserved (open)</dt><dd>${budget.reserved} minor units</dd>
     ${budget.budgets.map((b) => `<dt>Budget cap</dt><dd>${b.amount} ${esc(b.currency)}</dd>`).join('')}`;
@@ -157,21 +171,23 @@ export function renderGrantDetail(
   const receiptRows = receipts
     .map(
       (r) =>
-        `<tr><td><a href="/account/receipts/${esc(r.id)}">${esc(r.id)}</a></td><td>${esc(r.method ?? '')} ${esc(r.target)}</td><td>${statusBadge(r.decision === 'allowed' ? 'approved' : 'denied')}</td><td>${esc(formatTime(r.created_at))}</td></tr>`,
+        `<tr><td><a href="/account/receipts/${esc(r.id)}">${esc(r.id)}</a></td><td><span class="mono">${esc(r.method ?? '')} ${esc(r.target)}</span></td><td>${statusBadge(r.decision === 'allowed' ? 'approved' : 'denied')}</td><td>${esc(formatTime(r.created_at))}</td></tr>`,
     )
     .join('');
   const revokeBlock =
     effective === 'active'
-      ? `<form method="post" action="/account/connections/${esc(grant.jti)}/revoke">
+      ? `<div class="panel panel-sunken"><form method="post" action="/account/connections/${esc(grant.jti)}/revoke">
         ${csrfField(ctx.session?.csrfToken)}
         <input type="hidden" name="reason" value="revoked from grant detail">
         <button class="button button-danger" type="submit">Revoke this grant</button>
-        <p class="faint">Takes effect on the agent's next request. This reads back the stored record after revoking.</p>
-      </form>`
+        <p class="faint" style="margin:var(--space-3) 0 0">Takes effect on the agent's next request. The stored record is re-read after revoking.</p>
+      </form></div>`
       : `<p class="faint">This grant is ${effective}.</p>`;
   return `
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/account/connections">Agent connections</a><span class="crumb-sep">/</span>Grant</nav>
 <div class="page-head">
-  <div><span class="eyebrow"><a href="/account/connections">Agent connections</a> / grant</span><h1><span class="mono-id">${esc(grant.jti)}</span> ${statusBadge(effective)}</h1></div>
+  <div><h1><span class="mono-id">${esc(grant.jti)}</span></h1></div>
+  ${statusBadge(effective)}
 </div>
 <div class="account-grid">
   ${accountNav('connections')}
@@ -186,10 +202,10 @@ export function renderGrantDetail(
     </dl></div>
     ${revokeBlock}
     <div class="section"><div class="section-head"><h3>Signed receipts issued under this grant</h3></div>
-      ${receipts.length === 0 ? '<p class="muted">No receipts recorded yet.</p>' : `<table class="table"><thead><tr><th>Receipt</th><th>Request</th><th>Decision</th><th>At</th></tr></thead><tbody>${receiptRows}</tbody></table>`}
+      ${receipts.length === 0 ? '<p class="muted">No receipts recorded yet.</p>' : `<div class="table-wrap"><table class="table"><thead><tr><th>Receipt</th><th>Request</th><th>Decision</th><th>At</th></tr></thead><tbody>${receiptRows}</tbody></table></div>`}
     </div>
     <div class="section"><div class="section-head"><h3>Audit events</h3></div>
-      ${eventRows === '' ? '<p class="muted">No events recorded for this grant.</p>' : `<table class="table"><tbody>${eventRows}</tbody></table>`}
+      ${eventRows === '' ? '<p class="muted">No events recorded for this grant.</p>' : `<div class="table-wrap"><table class="table"><tbody>${eventRows}</tbody></table></div>`}
     </div>
   </div>
 </div>`;

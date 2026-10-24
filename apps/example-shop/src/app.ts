@@ -303,26 +303,37 @@ function buildRoutes(ctx: Ctx): Router {
     render(ctx, req, {
       title: 'Goods for a considered desk',
       section: 'home',
-      body: renderHome(
-        { ...(req.user !== undefined ? { user: req.user } : {}) },
-        listProducts(db).slice(0, 6),
-      ),
+      body: renderHome({ ...(req.user !== undefined ? { user: req.user } : {}) }, listProducts(db)),
     }),
   );
 
   router.get('/products', (req) => {
     const category = req.query.get('category') ?? undefined;
     const q = req.query.get('q') ?? undefined;
+    const sort = req.query.get('sort') ?? 'featured';
     const products =
       q !== undefined && q.trim() !== ''
         ? searchProducts(db, q)
         : category !== undefined
           ? listProducts(db, category)
           : listProducts(db);
+    switch (sort) {
+      case 'name':
+        products.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case 'price_asc':
+        products.sort((a, b) => a.price.amount - b.price.amount);
+        break;
+      case 'price_desc':
+        products.sort((a, b) => b.price.amount - a.price.amount);
+        break;
+      default:
+        break;
+    }
     return render(ctx, req, {
       title: 'Catalog',
       section: 'products',
-      body: renderCatalog({}, products, listCategories(db), category, q),
+      body: renderCatalog({}, products, listCategories(db), category, q, sort),
     });
   });
 
@@ -331,6 +342,9 @@ function buildRoutes(ctx: Ctx): Router {
     if (product === undefined) {
       return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
     }
+    const related = listProducts(db, product.category)
+      .filter((p) => p.sku !== product.sku)
+      .slice(0, 4);
     return render(ctx, req, {
       title: product.name,
       section: 'products',
@@ -340,6 +354,7 @@ function buildRoutes(ctx: Ctx): Router {
           ...(req.user !== undefined ? { user: req.user } : {}),
         },
         product,
+        related,
       ),
     });
   });

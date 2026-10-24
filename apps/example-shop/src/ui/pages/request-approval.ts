@@ -20,10 +20,10 @@ export function renderRequestApproval(
   const expired = record.expiresAt <= Math.floor(Date.now() / 1000);
 
   const decideBlock = decided
-    ? `<div class="panel"><p>This approval has already been decided: ${statusBadge(record.state)}</p>
-        <p><a class="button button-secondary" href="/account/connections">View agent connections</a></p></div>`
+    ? `<div class="consent-term"><p>This approval has already been decided: ${statusBadge(record.state)}</p>
+        <p style="margin:0"><a class="button button-secondary" href="/account/connections">View agent connections</a></p></div>`
     : expired
-      ? `<div class="panel"><p>This approval request expired at ${esc(formatTime(record.expiresAt))}. The agent must ask again.</p></div>`
+      ? `<div class="consent-term"><p style="margin:0">This approval request expired at ${esc(formatTime(record.expiresAt))}. The agent must ask again.</p></div>`
       : `<form method="post" action="/tg/request-approval/decide">
         ${csrfField(ctx.session?.csrfToken)}
         <input type="hidden" name="approval_id" value="${esc(record.id)}">
@@ -44,6 +44,10 @@ export function renderRequestApproval(
   </div>
 
   <div class="consent-terms">
+    <div class="consent-term consent-summary">
+      <h3>At a glance</h3>
+      <p>An agent operating under one of your grants wants to charge <strong>${esc(formatMoneyWithCurrency(record.amount))}</strong> from your simulated wallet. Approving authorizes this exact charge once.</p>
+    </div>
     <div class="consent-term panel-sunken">
       <h3>What is being asked</h3>
       <dl class="dl">

@@ -1,6 +1,6 @@
 import type { Invoice } from '../../domain/orders.ts';
 import { esc, formatDate, formatTime } from '../html.ts';
-import { price, statusBadge } from '../layout.ts';
+import { price, productThumb, statusBadge } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';
 
 /** Print-friendly invoice view. */
@@ -8,12 +8,14 @@ export function renderInvoice(_ctx: RenderCtx, invoice: Invoice): string {
   const { order, lines, address, userName, userEmail } = invoice;
   const rows = lines
     .map(
-      (line) => `<tr>
-        <td>${esc(line.name)}</td>
-        <td class="num">${line.qty}</td>
-        <td class="num">${price(line.unitPrice)}</td>
-        <td class="num">${price(line.lineTotal)}</td>
-      </tr>`,
+      (line) => `<div class="cart-line">
+        <div class="cart-line-media">${productThumb(line.sku, line.name)}</div>
+        <div class="cart-line-info">
+          <span class="cart-line-name">${esc(line.name)}</span>
+          <span class="cart-line-unit">${price(line.unitPrice)} x ${line.qty}</span>
+        </div>
+        <div class="cart-line-price">${price(line.lineTotal)}</div>
+      </div>`,
     )
     .join('');
   const shipTo =
@@ -33,20 +35,18 @@ export function renderInvoice(_ctx: RenderCtx, invoice: Invoice): string {
 </div>
 <div class="cart-layout">
   <div>
-    <table class="table">
-      <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="3" class="total-row">Total due</td><td class="num total-row">${price(order.total)}</td></tr></tfoot>
-    </table>
+    <div class="cart-lines">${rows}</div>
+    <div class="summary-line summary-total"><span>Total due</span>${price(order.total)}</div>
   </div>
-  <aside class="panel">
-    <dl class="dl">
+  <aside class="summary-card">
+    <h2>Billing</h2>
+    <dl class="dl" style="grid-template-columns:1fr">
       <dt>Billed to</dt><dd>${esc(userName)}<br><span class="muted">${esc(userEmail)}</span></dd>
       <dt>Ship to</dt><dd>${shipTo}</dd>
       <dt>Order</dt><dd><span class="mono-id">${esc(order.id)}</span></dd>
       <dt>Paid</dt><dd>${order.paidAt !== undefined ? esc(formatTime(order.paidAt)) : 'Unpaid'}</dd>
     </dl>
-    <p class="faint">ExampleShop is a demonstration storefront. This invoice documents a simulated transaction; no real funds moved.</p>
+    <p class="faint" style="margin:var(--space-3) 0 0">ExampleShop is a demonstration storefront. This invoice documents a simulated transaction; no real funds moved.</p>
   </aside>
 </div>`;
 }

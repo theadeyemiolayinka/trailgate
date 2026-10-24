@@ -1,6 +1,6 @@
 import type { ReceiptPayload } from '@trailgate/core';
 import { esc, formatTime } from '../html.ts';
-import { csrfField, statusBadge } from '../layout.ts';
+import { csrfField, pageHead, statusBadge } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';
 import { accountNav } from './account.ts';
 
@@ -23,7 +23,7 @@ export function renderReceiptList(ctx: RenderCtx, rows: StoredReceiptRow[]): str
   const body =
     rows.length === 0
       ? '<p class="muted">No receipts recorded yet. Every signed request under a grant produces a receipt; they appear here after an agent acts.</p>'
-      : `<table class="table">
+      : `<div class="table-wrap"><table class="table">
         <thead><tr><th>Receipt</th><th>Grant</th><th>Request</th><th>Decision</th><th>Issued</th></tr></thead>
         <tbody>${rows
           .map(
@@ -36,27 +36,29 @@ export function renderReceiptList(ctx: RenderCtx, rows: StoredReceiptRow[]): str
             </tr>`,
           )
           .join('')}</tbody>
-      </table>`;
+      </table></div>`;
   return `
-<div class="page-head"><div><span class="eyebrow">Account / Receipts</span><h1>Signed receipts</h1></div></div>
+${pageHead('Account', 'Receipts', 'Every signed request an agent makes produces a receipt. Open one to verify it against the site\u2019s signing keys.')}
 <div class="account-grid">
   ${accountNav('receipts')}
   <div>
     <section class="section">
-      <div class="section-head"><h3>Issued under your grants</h3></div>
-      <p class="faint">Receipts are signed by the shop for every protected request. Open one to verify it against the site's current signing keys.</p>
+      <div class="section-head"><h3>All receipts</h3></div>
       ${body}
     </section>
     <section class="section">
       <div class="section-head"><h3>Verify a receipt</h3></div>
-      <form method="post" action="/account/receipts/verify">
-        ${csrfField(ctx.session?.csrfToken)}
-        <div class="field" style="max-width:none">
-          <label for="receipt">Receipt token (compact JWS)</label>
-          <textarea id="receipt" name="receipt" rows="4" spellcheck="false" class="mono" style="width:100%"></textarea>
-        </div>
-        <button class="button button-secondary" type="submit">Verify</button>
-      </form>
+      <div class="panel">
+        <form method="post" action="/account/receipts/verify">
+          ${csrfField(ctx.session?.csrfToken)}
+          <div class="field" style="max-width:none">
+            <label for="receipt">Receipt token</label>
+            <textarea id="receipt" name="receipt" rows="4" spellcheck="false" class="mono" style="width:100%"></textarea>
+            <p class="hint">Paste the compact JWS returned to the agent.</p>
+          </div>
+          <button class="button button-secondary" type="submit">Verify</button>
+        </form>
+      </div>
     </section>
   </div>
 </div>`;
@@ -91,7 +93,8 @@ export function renderReceiptDetail(
       ? `<dl class="dl"><dt>Stored for request</dt><dd><span class="mono">${esc(meta.method)} ${esc(meta.target)}</span></dd><dt>Grant</dt><dd><a class="mono-id" href="/account/connections/${esc(meta.grant_id)}">${esc(meta.grant_id)}</a></dd></dl>`
       : '';
   return `
-<div class="page-head"><div><span class="eyebrow"><a href="/account/receipts">Receipts</a> / inspection</span><h1>Receipt inspection</h1></div></div>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/account/receipts">Receipts</a><span class="crumb-sep">/</span>Inspection</nav>
+<div class="page-head"><div><h1>Receipt inspection</h1></div></div>
 <div class="account-grid">
   ${accountNav('receipts')}
   <div class="stack">
@@ -99,7 +102,7 @@ export function renderReceiptDetail(
     ${metaBlock !== '' ? `<div class="panel">${metaBlock}</div>` : ''}
     ${claims !== '' ? `<div class="panel">${claims}</div>` : ''}
     <div class="panel panel-sunken"><h3>Raw token</h3><p class="mono-id" style="word-break:break-all">${esc(rawToken)}</p>
-    <p class="faint">A verified receipt proves the site recorded a decision for a specific request. It does not prove settlement or fulfillment.</p></div>
+    <p class="faint" style="margin:var(--space-3) 0 0">A verified receipt proves the site recorded a decision for a specific request. It does not prove settlement or fulfillment.</p></div>
   </div>
 </div>`;
 }

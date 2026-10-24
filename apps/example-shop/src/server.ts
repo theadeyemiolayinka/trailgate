@@ -24,10 +24,32 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
 };
 
-const STATIC_FILES: Record<string, { file: string; type: string }> = {
-  '/static/app.css': { file: 'app.css', type: 'text/css; charset=utf-8' },
-  '/static/favicon.svg': { file: 'favicon.svg', type: 'image/svg+xml' },
+const STATIC_MIME: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
 };
+
+function staticFile(path: string): { filePath: string; type: string } | undefined {
+  if (!path.startsWith('/static/')) {
+    return undefined;
+  }
+  const rel = decodeURIComponent(path.slice('/static/'.length));
+  if (rel === '' || rel.includes('..') || rel.includes('\0')) {
+    return undefined;
+  }
+  const filePath = join(publicDir, rel);
+  if (!filePath.startsWith(`${publicDir}/`) || !existsSync(filePath)) {
+    return undefined;
+  }
+  const type = STATIC_MIME[filePath.slice(filePath.lastIndexOf('.')).toLowerCase()];
+  return type === undefined ? undefined : { filePath, type };
+}
 
 function collectBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
   return new Promise((resolve, reject) => {
@@ -69,16 +91,14 @@ async function route(
     const body = await collectBody(req);
     const url = req.url ?? '/';
     const path = new URL(url, 'https://local').pathname;
-    const staticFile = STATIC_FILES[path];
-    if (staticFile !== undefined && req.method === 'GET') {
-      const filePath = join(publicDir, staticFile.file);
-      const data = existsSync(filePath) ? readFileSync(filePath) : undefined;
-      res.writeHead(data === undefined ? 404 : 200, {
-        'content-type': staticFile.type,
-        'cache-control': 'public, max-age=300',
+    const file = staticFile(path);
+    if (file !== undefined && req.method === 'GET') {
+      res.writeHead(200, {
+        'content-type': file.type,
+        'cache-control': 'public, max-age=3600',
         ...SECURITY_HEADERS,
       });
-      res.end(data ?? '');
+      res.end(readFileSync(file.filePath));
       return;
     }
     const out = await app.handle({

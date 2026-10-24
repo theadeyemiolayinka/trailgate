@@ -1,11 +1,12 @@
 import type { Address } from '../../domain/users.ts';
 import { esc } from '../html.ts';
-import { csrfField, emptyState } from '../layout.ts';
+import { csrfField, emptyState, pageHead } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';
 
 export function accountNav(section: string): string {
   const items: [string, string, string][] = [
     ['/account', 'Profile', 'profile'],
+    ['/orders', 'Orders', 'orders'],
     ['/account/addresses', 'Addresses', 'addresses'],
     ['/account/wallet', 'Wallet', 'wallet'],
     ['/account/connections', 'Agent connections', 'connections'],
@@ -15,10 +16,10 @@ export function accountNav(section: string): string {
   const links = items
     .map(
       ([href, label, key]) =>
-        `<li><a href="${href}"${section === key ? ' aria-current="page"' : ''}>${esc(label)}</a></li>`,
+        `<a href="${href}"${section === key ? ' aria-current="page"' : ''}>${esc(label)}</a>`,
     )
     .join('');
-  return `<nav aria-label="Account"><ul class="account-nav">${links}</ul></nav>`;
+  return `<nav class="account-nav" aria-label="Account sections">${links}</nav>`;
 }
 
 export function renderProfile(ctx: RenderCtx): string {
@@ -27,23 +28,17 @@ export function renderProfile(ctx: RenderCtx): string {
     return '';
   }
   return `
-<div class="page-head"><div><span class="eyebrow">Account</span><h1>${esc(user.name)}</h1></div></div>
+${pageHead('Account', user.name)}
 <div class="account-grid">
   ${accountNav('profile')}
-  <div>
-    <dl class="dl">
-      <dt>Email</dt><dd>${esc(user.email)}</dd>
-      <dt>Member since</dt><dd>${esc(new Date(user.createdAt * 1000).toISOString().slice(0, 10))}</dd>
-      <dt>User id</dt><dd><span class="mono-id">${esc(user.id)}</span></dd>
-    </dl>
+  <div class="stack">
     <div class="panel">
-      <h3>Agent-facing resource identifiers</h3>
-      <p class="muted">Agents request access to named resources. If you approve, these selectors scope what a grant may touch.</p>
+      <div class="section-head"><h3>Profile</h3></div>
       <dl class="dl">
-        <dt>Cart</dt><dd><span class="mono-id">cart:cart_${esc(user.id)}</span></dd>
-        <dt>Wallet</dt><dd><span class="mono-id">wallet:wlt_${esc(user.id)}</span></dd>
+        <dt>Email</dt><dd>${esc(user.email)}</dd>
+        <dt>Member since</dt><dd>${esc(new Date(user.createdAt * 1000).toISOString().slice(0, 10))}</dd>
+        <dt>User id</dt><dd><span class="mono-id">${esc(user.id)}</span></dd>
       </dl>
-      <p class="faint">Order selectors are per-order (<span class="mono-id">order:ord_*</span>); an agent learns them from the orders it can see.</p>
     </div>
   </div>
 </div>`;
@@ -68,13 +63,13 @@ export function renderAddresses(ctx: RenderCtx, addresses: Address[]): string {
           )
           .join('')}</div>`;
   return `
-<div class="page-head"><div><span class="eyebrow">Account / Addresses</span><h1>Addresses</h1></div></div>
+${pageHead('Account', 'Addresses')}
 <div class="account-grid">
   ${accountNav('addresses')}
   <div>
     ${list}
-    <div class="panel">
-      <h3>Add an address</h3>
+    <div class="panel" style="margin-top:var(--space-4)">
+      <div class="section-head"><h3>Add an address</h3></div>
       <form method="post" action="/account/addresses">
         ${csrfField(ctx.session?.csrfToken)}
         <div class="field"><label for="label">Label</label><input id="label" name="label" required maxlength="40" placeholder="Home"></div>

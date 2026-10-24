@@ -87,9 +87,10 @@ function permissionLabel(permission: string): string {
 }
 
 /**
- * The consent surface (spec section 10.3). Renders the requested scope
- * verbatim from the stored grant request, then the effective scope the shop
- * will actually issue when it differs.
+ * The consent surface (spec section 10.3). Renders a plain-language summary of
+ * the effective scope first, then the requested scope verbatim from the
+ * stored grant request, then the effective scope the shop will actually issue
+ * when it differs.
  */
 export function renderConsent(
   ctx: RenderCtx,
@@ -122,8 +123,8 @@ export function renderConsent(
       : '<p class="consent-note">The agent is waiting on a status check; there is no redirect.</p>';
 
   const decidedBlock = decided
-    ? `<div class="panel"><p>This request has already been decided: ${statusBadge(view.status)}</p>
-        <p><a class="button button-secondary" href="/account/connections">View agent connections</a></p></div>`
+    ? `<div class="consent-term"><p>This request has already been decided: ${statusBadge(view.status)}</p>
+        <p style="margin:0"><a class="button button-secondary" href="/account/connections">View agent connections</a></p></div>`
     : `<form method="post" action="/tg/consent/decide">
         ${csrfField(ctx.session?.csrfToken)}
         <input type="hidden" name="request_id" value="${esc(view.requestId)}">
@@ -146,6 +147,10 @@ export function renderConsent(
       </div>`
     : '';
 
+  const summaryPerms = effective.permissions
+    .map((p) => `<li>${esc(permissionLabel(p))}</li>`)
+    .join('');
+
   return `
 <div class="consent-frame">
   <div class="consent-agent">
@@ -157,6 +162,12 @@ export function renderConsent(
   </div>
 
   <div class="consent-terms">
+    <div class="consent-term consent-summary">
+      <h3>At a glance</h3>
+      <p>This agent will be able to:</p>
+      <ul>${summaryPerms}</ul>
+      <p style="margin:var(--space-3) 0 0">Effective for <strong>${esc(formatDuration(effective.lifetimeSeconds))}</strong>, on <strong>${esc(site.name)}</strong> only.</p>
+    </div>
     <div class="consent-term">
       <h3>Site granting access</h3>
       <p><strong>${esc(site.name)}</strong> <span class="mono-id">${esc(site.issuer)}</span></p>
