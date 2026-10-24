@@ -1,14 +1,13 @@
-import { createPrivateKey, generateKeyPairSync, type JsonWebKey } from 'node:crypto';
-import type { Jwk, JwtAlgorithm, Money, ReceiptPayload } from '@trailgate/core';
+import { generateKeyPairSync, type JsonWebKey } from 'node:crypto';
+import type { GrantPayload, Jwk, JwtAlgorithm, Money, ReceiptPayload } from '@trailgate/core';
 import {
   buildReceiptPayload,
   Codes,
-  GRANT_TYP,
   jwkThumbprint,
+  signGrant,
   signReceipt,
   TrailGateError,
 } from '@trailgate/core';
-import { SignJWT } from 'jose';
 import { randomId } from './ids.ts';
 
 /**
@@ -56,14 +55,8 @@ export function siteSigningKey(input: SiteSigningKeyInput): SiteSigningKey {
 }
 
 /** Signs a grant payload as a compact JWS (spec section 6.1). */
-export async function signGrantJwt(
-  payload: Record<string, unknown>,
-  key: SiteSigningKey,
-): Promise<string> {
-  const privateKey = createPrivateKey({ key: key.privateJwk as JsonWebKey, format: 'jwk' });
-  return new SignJWT(payload)
-    .setProtectedHeader({ alg: key.alg, typ: GRANT_TYP, kid: key.kid })
-    .sign(privateKey);
+export async function signGrantJwt(payload: GrantPayload, key: SiteSigningKey): Promise<string> {
+  return signGrant(payload, { privateJwk: key.privateJwk, kid: key.kid, alg: key.alg });
 }
 
 export interface IssueReceiptInput {

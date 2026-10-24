@@ -39,6 +39,18 @@ export interface RevocationChecker {
 export interface Ledger {
   consumedMinorUnits(grantId: string, currency: string): Promise<number>;
   reservedMinorUnits(grantId: string, currency: string): Promise<number>;
+  /**
+   * Sum of consumed entries within `(now - windowSeconds, now]` for the
+   * `spend_window` constraint (spec section 9.2). Required only when grants
+   * carry `spend_window`; its absence fails closed with
+   * `tg.internal.unavailable`.
+   */
+  consumedInWindow?(
+    grantId: string,
+    currency: string,
+    windowSeconds: number,
+    now: number,
+  ): Promise<number>;
 }
 
 export interface RateLimiter {

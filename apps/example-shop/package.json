@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@trailgate/agent": "workspace:*",
+    "@trailgate/conformance": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:"
   }

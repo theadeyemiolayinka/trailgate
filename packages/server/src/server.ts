@@ -3,7 +3,7 @@ import { Codes, isTrailGateError, TrailGateError, toErrorResponse } from '@trail
 import type { ResolvedServerConfig, TrailGateServerOptions } from './config.ts';
 import { resolveConfig } from './config.ts';
 import { buildDiscoveryDocument } from './discovery.ts';
-import { createProtectedHandler } from './enforcement.ts';
+import { assertRequestLimits, createProtectedHandler } from './enforcement.ts';
 import {
   decideConsent,
   getConsentView,
@@ -53,9 +53,9 @@ export interface TrailGateServer {
   /** `GET <endpoints.grant_status>` (spec section 10.5). */
   handleStatus(req: HostRequest): Promise<HostResponse>;
   /**
-   * `POST <endpoints.grant_revocation>`.
-   * @provisional The endpoint body and caller model are not yet specified in
-   * draft 0.1; requires a configured `revocationAuthorizer`.
+   * `POST <endpoints.grant_revocation>` (spec section 13). Agent
+   * self-revocation verifies as a protected request; other callers need a
+   * configured `revocationAuthorizer`.
    */
   handleRevocation(req: HostRequest): Promise<HostResponse>;
   /** Host-initiated revocation from authenticated site surfaces (spec section 13). */
@@ -97,6 +97,7 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
     discoveryDocument: () => buildDiscoveryDocument(config),
     handleGrantRequest: async (req) => {
       try {
+        assertRequestLimits(req, config);
         return json(201, await submitGrantRequest(parseJson(req.body), config));
       } catch (err) {
         return errorResponse(err);
@@ -107,6 +108,7 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
       decideConsent(requestId, decision, siteUserId, config),
     handleRedemption: async (req) => {
       try {
+        assertRequestLimits(req, config);
         const body = parseJson(req.body);
         return json(200, await redeemGrant(body, config));
       } catch (err) {

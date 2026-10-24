@@ -2,11 +2,8 @@ import type { KeyResolver, ReceiptPayload } from '@trailgate/core';
 import { isTrailGateError, verifyReceipt } from '@trailgate/core';
 
 /**
- * Response header the server SDK uses to deliver the receipt JWS.
- * @provisional Draft 0.1 requires a receipt for every protected request but
- * does not name the delivery channel (spec section 14). This constant
- * mirrors `RECEIPT_HEADER` in `@trailgate/server`; a different transport
- * decision by D0 changes both packages together.
+ * Response header the server uses to deliver the receipt JWS (spec section
+ * 14.1). Mirrors `RECEIPT_HEADER` in `@trailgate/server`.
  */
 export const RECEIPT_HEADER = 'trailgate-receipt';
 

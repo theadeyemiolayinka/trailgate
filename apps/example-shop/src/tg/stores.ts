@@ -266,23 +266,52 @@ export function createNonceStore(db: Db): NonceStore {
 }
 
 export function createIdempotencyStore(db: Db): RequestIdempotencyStore {
+  const read = (grantId: string, key: string): StoredIdempotencyRecord | undefined => {
+    const row = db
+      .prepare('SELECT request_digest, outcome FROM tg_idempotency WHERE grant_id = ? AND key = ?')
+      .get(grantId, key) as { request_digest: string; outcome: string | null } | undefined;
+    if (row === undefined) {
+      return undefined;
+    }
+    const record: StoredIdempotencyRecord = { requestDigest: row.request_digest };
+    if (row.outcome !== null) {
+      record.outcome = JSON.parse(row.outcome) as NonNullable<StoredIdempotencyRecord['outcome']>;
+    }
+    return record;
+  };
   return {
-    lookup: async (grantId, key) => {
-      const row = db
+    lookup: async (grantId, key) => read(grantId, key),
+    claim: async (grantId, key, requestDigest) => {
+      // INSERT ON CONFLICT is the atomic claim: two concurrent claims cannot
+      // both insert the pending row (spec section 11.4).
+      const result = db
         .prepare(
-          'SELECT request_digest, outcome FROM tg_idempotency WHERE grant_id = ? AND key = ?',
+          `INSERT INTO tg_idempotency (grant_id, key, request_digest, outcome, created_at)
+           VALUES (?, ?, ?, NULL, ?) ON CONFLICT (grant_id, key) DO NOTHING`,
         )
-        .get(grantId, key) as { request_digest: string; outcome: string | null } | undefined;
-      if (row === undefined) {
-        return undefined;
+        .run(grantId, key, requestDigest, Math.floor(Date.now() / 1000));
+      if (result.changes === 1) {
+        return { kind: 'claimed' };
       }
-      const record: StoredIdempotencyRecord = { requestDigest: row.request_digest };
-      if (row.outcome !== null) {
-        record.outcome = JSON.parse(row.outcome) as NonNullable<StoredIdempotencyRecord['outcome']>;
+      const existing = read(grantId, key);
+      if (existing === undefined) {
+        return { kind: 'claimed' };
       }
-      return record;
+      return existing.requestDigest === requestDigest
+        ? { kind: 'existing', record: existing }
+        : { kind: 'conflict' };
     },
     record: async (grantId, key, record) => {
+      // Fill the pending row claim() created; insert when no claim ran.
+      const updated = db
+        .prepare(
+          `UPDATE tg_idempotency SET outcome = ?
+           WHERE grant_id = ? AND key = ? AND request_digest = ?`,
+        )
+        .run(JSON.stringify(record.outcome), grantId, key, record.requestDigest);
+      if (updated.changes === 1) {
+        return;
+      }
       const result = db
         .prepare(
           `INSERT INTO tg_idempotency (grant_id, key, request_digest, outcome, created_at)
@@ -296,10 +325,8 @@ export function createIdempotencyStore(db: Db): RequestIdempotencyStore {
           Math.floor(Date.now() / 1000),
         );
       if (result.changes === 0) {
-        const existing = db
-          .prepare('SELECT request_digest FROM tg_idempotency WHERE grant_id = ? AND key = ?')
-          .get(grantId, key) as { request_digest: string } | undefined;
-        if (existing !== undefined && existing.request_digest !== record.requestDigest) {
+        const existing = read(grantId, key);
+        if (existing !== undefined && existing.requestDigest !== record.requestDigest) {
           throw new TrailGateError(
             Codes.REQUEST_IDEMPOTENCY_CONFLICT,
             'idempotency key was used for a different operation',
@@ -341,6 +368,21 @@ export function createSpendingLedger(db: Db, now: () => number): SpendingLedger 
         .get(grantId, currency) as unknown as SumRow
     ).total ?? 0;
 
+  const sumConsumedInWindow = (
+    grantId: string,
+    currency: string,
+    windowSeconds: number,
+    now: number,
+  ): number =>
+    (
+      db
+        .prepare(
+          `SELECT SUM(amount_minor) AS total FROM tg_ledger_consumed
+           WHERE grant_id = ? AND currency = ? AND at > ? AND at <= ?`,
+        )
+        .get(grantId, currency, now - windowSeconds, now) as unknown as SumRow
+    ).total ?? 0;
+
   return {
     consumedMinorUnits: async (grantId, currency) => {
       return sumConsumed(grantId, currency);
@@ -349,7 +391,18 @@ export function createSpendingLedger(db: Db, now: () => number): SpendingLedger 
       sweepExpired();
       return sumReserved(grantId, currency);
     },
-    reserve: async ({ reservationId, grantId, amount, budgets, now: at, ttlSeconds }) => {
+    consumedInWindow: async (grantId, currency, windowSeconds, now) => {
+      return sumConsumedInWindow(grantId, currency, windowSeconds, now);
+    },
+    reserve: async ({
+      reservationId,
+      grantId,
+      amount,
+      budgets,
+      spendWindows,
+      now: at,
+      ttlSeconds,
+    }) => {
       db.exec('BEGIN IMMEDIATE');
       try {
         sweepExpired();
@@ -362,6 +415,23 @@ export function createSpendingLedger(db: Db, now: () => number): SpendingLedger 
               'cumulative_budget would be exceeded',
               { type: 'cumulative_budget', limit: budget, consumed: spent, reserved: held },
             );
+          }
+        }
+        for (const window of spendWindows ?? []) {
+          const spentInWindow = sumConsumedInWindow(
+            grantId,
+            amount.currency,
+            window.windowSeconds,
+            at,
+          );
+          if (spentInWindow + held + amount.amount > window.limit.amount) {
+            throw new TrailGateError(Codes.CONSTRAINT_VIOLATED, 'spend_window would be exceeded', {
+              type: 'spend_window',
+              limit: window.limit,
+              window_seconds: window.windowSeconds,
+              consumed: spentInWindow,
+              reserved: held,
+            });
           }
         }
         const reservation: Reservation = {

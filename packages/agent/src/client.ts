@@ -164,10 +164,10 @@ export interface AgentClient {
     input: FetchProtectedInput,
   ): Promise<ProtectedResponse>;
   /**
-   * `POST grant_revocation` with `{grant_id, reason?}`.
-   * @provisional Draft 0.1 names the endpoint but does not specify an
-   * agent-initiated body or caller model; this mirrors the server SDK's
-   * provisional shape. Change goes through D0/D1.
+   * `POST grant_revocation` with `{grant_id, reason?}` sent as a section 11
+   * signed request carrying the grant being revoked (spec section 13 agent
+   * self-revocation). The stored grant and its signing key are required;
+   * the record is removed locally on success.
    */
   revokeGrant(
     target: string | SiteContext,
@@ -398,17 +398,33 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
 
     async revokeGrant(target, grantId, opts): Promise<void> {
       const context = await site(target);
-      const res = await transport.send({
-        method: 'POST',
-        url: context.document.endpoints.grant_revocation,
-        headers: { 'content-type': 'application/json' },
-        body: new TextEncoder().encode(
-          JSON.stringify({
+      // Spec section 13: agent self-revocation presents the revocation call
+      // as a section 11 signed request carrying the grant being revoked.
+      const grant = await store.get(grantId);
+      if (grant === undefined) {
+        throw new AgentError('no_grant', `no stored grant ${grantId}`);
+      }
+      const signer = signers.get(grant.keyId);
+      if (signer === undefined) {
+        throw new AgentError(
+          'no_key',
+          `grant is bound to key ${grant.keyId}, which is not registered`,
+        );
+      }
+      const res = await executeProtectedRequest(
+        context,
+        grant,
+        signer,
+        {
+          method: 'POST',
+          target: context.document.endpoints.grant_revocation,
+          body: JSON.stringify({
             grant_id: grantId,
             ...(opts?.reason !== undefined ? { reason: opts.reason } : {}),
           }),
-        ),
-      });
+        },
+        { transport, clock },
+      );
       if (res.status !== 200) {
         throw errorFromResponse(res.status, res.body);
       }

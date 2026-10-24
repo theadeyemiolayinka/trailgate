@@ -133,6 +133,32 @@ test('idempotency store: records outcome, rejects different digest', async () =>
   );
 });
 
+test('idempotency store: claim is atomic, pending rows, record fills outcome', async () => {
+  const db = testDb();
+  const store = createIdempotencyStore(db);
+  assert.deepEqual(await store.claim('grt_1', 'key-1', 'digest-a'), { kind: 'claimed' });
+  // Second claim sees the pending record, not a fresh claim.
+  const second = await store.claim('grt_1', 'key-1', 'digest-a');
+  assert.equal(second.kind, 'existing');
+  const conflict = await store.claim('grt_1', 'key-1', 'digest-b');
+  assert.equal(conflict.kind, 'conflict');
+  // Record fills the claimed row.
+  await store.record('grt_1', 'key-1', {
+    requestDigest: 'digest-a',
+    outcome: { status: 201 },
+  });
+  const stored = await store.lookup('grt_1', 'key-1');
+  assert.equal(stored?.outcome?.status, 201);
+  // Digest mismatch on record is a conflict.
+  await assert.rejects(
+    () => store.record('grt_1', 'key-1', { requestDigest: 'nope', outcome: { status: 200 } }),
+    TrailGateError,
+  );
+  // Recording without a prior claim inserts the outcome directly.
+  await store.record('grt_9', 'key-9', { requestDigest: 'x', outcome: { status: 200 } });
+  assert.equal((await store.lookup('grt_9', 'key-9'))?.outcome?.status, 200);
+});
+
 test('spending ledger: reserve, consume, release, refund, budget headroom', async () => {
   const db = testDb();
   const ledger = createSpendingLedger(db, () => NOW);
@@ -210,6 +236,43 @@ test('spending ledger: expired reservations stop counting against headroom', asy
     ttlSeconds: 60,
   });
   assert.equal(r.state, 'reserved');
+});
+
+test('spending ledger: spend_window headroom and consumedInWindow', async () => {
+  let at = NOW;
+  const db = testDb();
+  const ledger = createSpendingLedger(db, () => at);
+  const usd = (amount: number) => ({ amount, currency: 'USD' });
+  const windows = [{ limit: usd(5000), windowSeconds: 3600 }];
+
+  await ledger.reserve({
+    reservationId: 'rsv_1',
+    grantId: 'grt_1',
+    amount: usd(4000),
+    budgets: [],
+    spendWindows: windows,
+    now: at,
+    ttlSeconds: 300,
+  });
+  await assert.rejects(
+    () =>
+      ledger.reserve({
+        reservationId: 'rsv_2',
+        grantId: 'grt_1',
+        amount: usd(2000),
+        budgets: [],
+        spendWindows: windows,
+        now: at,
+        ttlSeconds: 300,
+      }),
+    (err: unknown) =>
+      err instanceof TrailGateError &&
+      err.code === Codes.CONSTRAINT_VIOLATED &&
+      err.detail?.['type'] === 'spend_window',
+  );
+  await ledger.consume('rsv_1', at);
+  assert.equal(await ledger.consumedInWindow?.('grt_1', 'USD', 3600, at), 4000);
+  assert.equal(await ledger.consumedInWindow?.('grt_1', 'USD', 10, at + 100), 0);
 });
 
 test('rate limiter counts within rolling window', async () => {

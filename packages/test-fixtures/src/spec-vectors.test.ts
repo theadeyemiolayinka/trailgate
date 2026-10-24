@@ -9,6 +9,7 @@ const REGISTERED_CONSTRAINT_TYPES = new Set([
   'cumulative_budget',
   'rate_limit',
   'valid_window',
+  'spend_window',
 ]);
 
 function loadJson(relativePath) {
@@ -47,6 +48,7 @@ test('all spec schemas compile', () => {
     'receipt',
     'error',
     'audit-event',
+    'grant-revocation',
   ];
   for (const name of expected) {
     assert.ok(validators.has(`urn:trailgate:schemas:${name}`), `missing schema: ${name}`);

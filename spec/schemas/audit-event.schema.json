@@ -18,6 +18,7 @@
         "reservation.created",
         "reservation.consumed",
         "reservation.released",
+        "idempotency.record_failed",
         "key.rotated"
       ]
     },

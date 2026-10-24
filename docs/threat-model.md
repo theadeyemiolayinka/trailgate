@@ -41,18 +41,18 @@ Legend:
 
 | Surface | Threats | Required mitigation | Status |
 | --- | --- | --- | --- |
-| Discovery document | Spoofing, downgrade, malicious endpoints | Schema validation, HTTPS, same-origin endpoints, version and `critical` checks | Core (parse-time). Network fetch, TLS, redirects, caching: Unimplemented |
-| Consent redirect and callback | Open redirect, CSRF, code interception | Strict redirect URI validation, `state` binding, single-use codes, S256 challenge | Unimplemented (spec only) |
-| Grant issuance | Overbroad scope, confused deputy | Explicit consent, least-privilege scopes, per-resource checks at enforcement | Enforcement-side checks: Core. Consent UX: Unimplemented |
+| Discovery document | Spoofing, downgrade, malicious endpoints | Schema validation, HTTPS, same-origin endpoints, version and `critical` checks | Core (parse-time) + Agent SDK transport (HTTPS, no redirects, cache cap). Document signing: open spec issue |
+| Consent redirect and callback | Open redirect, CSRF, code interception | Strict redirect URI validation, `state` binding, single-use codes, S256 challenge | Agent SDK (`validateConsentCallback`, S256) + Server SDK (single-use redemption CAS) |
+| Grant issuance | Overbroad scope, confused deputy | Explicit consent, least-privilege scopes, per-resource checks at enforcement | Enforcement-side checks: Core. Consent flow: Server SDK + host UI |
 | Signed requests | Replay, tampering, key substitution | RFC 9421 PoP binding method, target, body, timestamp, nonce; atomic nonce claim | Core. Nonce store atomicity: Port |
-| Constraints | Agent-side tampering, concurrent overspend | Server-authoritative evaluation, atomic spending reservations, rollback | Evaluation: Core. Atomic spending lifecycle: Unimplemented |
+| Constraints | Agent-side tampering, concurrent overspend | Server-authoritative evaluation, atomic spending reservations, rollback | Evaluation: Core. Atomic spending lifecycle: Server SDK + Port (`cumulative_budget`, `spend_window` checked inside one atomic reserve) |
 | Expiry and revocation | Stale grants used after revocation | Expiry checks, revocation at enforcement, fail closed on lookup failure | Core + Port (fail-closed on port error verified) |
-| Model runtime | Credential exfiltration, prompt injection | Keys never enter model context, scoped least privilege, audited actions | Unimplemented (D2 responsibility) |
-| Denial of service | Resource exhaustion, policy abuse | Rate limits, body size limits, per-grant quotas | `rate_limit` constraint: Core + Port. Transport-level limits: Unimplemented |
+| Model runtime | Credential exfiltration, prompt injection | Keys never enter model context, scoped least privilege, audited actions | Agent SDK (`AgentSigner` non-exportable, keys out of model-visible surfaces). Prompt injection itself: out of protocol scope |
+| Denial of service | Resource exhaustion, policy abuse | Rate limits, body size limits, per-grant quotas | `rate_limit` constraint: Core + Port. Request size bounds (`maxBodyBytes`, `maxHeadersBytes`, `tg.request.too_large`): Server SDK. Connection-level quotas: host/edge |
 | Cross-user access | IDOR through a valid grant | Per-request resource ownership checks independent of grant validity | Core + Port (sub-less grant bypass found and fixed: F-1) |
-| Key lifecycle | Key theft, stale or duplicated keys | Rotation support, secure storage at rest, documented provider limitations | Resolution only: Core (`jkt`/`kid` lookup). Rotation/storage: Unimplemented |
-| Audit | Repudiation, log tampering | Signed receipts, append-only audit log | Receipts: Core. Audit store: Unimplemented |
-| Spending ledger | Double spend, reservation leak, refund errors | Atomic ledger operations, reconciliation, tested rollback paths | Unimplemented |
+| Key lifecycle | Key theft, stale or duplicated keys | Rotation support, secure storage at rest, documented provider limitations | Site rotation: Server SDK (`rotateSigningKey`, multi-key publish/verify). Agent custody: Agent SDK (software/file providers; OS-keystore interface-ready, unimplemented). Site signing key custody: deployment responsibility (KMS) |
+| Audit | Repudiation, log tampering | Signed receipts, append-only audit log | Receipts: Core. Audit sink: Port (append-only contract) |
+| Spending ledger | Double spend, reservation leak, refund errors | Atomic ledger operations, reconciliation, tested rollback paths | Port contract implemented (`SpendingLedger`); atomicity: Port + conformance suite |
 | Dependency failure | Silent continue, info leak | Fail closed with `tg.internal.unavailable`/`tg.internal.error` | Core (verified via throwing-port tests: F-2) |
 
 ## Unresolved risks
@@ -67,12 +67,18 @@ Legend:
 - The deniability and non-repudiation properties of receipts are undecided. A receipt
   proves the site recorded a decision; it does not prove settlement or fulfillment.
 - Port implementations can silently weaken every Port-marked mitigation: a non-atomic
-  `NonceStore`, a non-atomic `IdempotencyStore`, or a `RateLimiter` with a read-then-write
-  race each reintroduce the attack the port exists to prevent. Conformance tests for port
-  implementations are needed.
-- Open spec questions: `rate_limit` counting semantics (fixed vs sliding window), replay
-  store eviction semantics, reservation TTL, grant refresh, and whether grants may be
-  attenuated after issuance.
+  `NonceStore`, a non-atomic `RequestIdempotencyStore`, a non-transactional
+  `SpendingLedger`, or a `RateLimiter` with a read-then-write race each reintroduce
+  the attack the port exists to prevent. `@trailgate/conformance`
+  (`runPortContractSuite`) exercises these contracts against any implementation and
+  must be run against production stores before deploying.
+- An idempotency claim abandoned by a crashed request leaves a pending record that
+  answers `tg.request.idempotency_in_flight` to retries until the site's claim TTL
+  reclaims it. Stores that never expire pending records create a permanent denial
+  for that key.
+- Open spec questions: `rate_limit` counting semantics (fixed vs sliding window),
+  replay store eviction semantics, reservation TTL, grant refresh, and whether grants
+  may be attenuated after issuance.
 
 ## Non-goals
 

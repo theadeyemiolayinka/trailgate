@@ -157,6 +157,7 @@ A constraint is `{ "type": "<name>", "params": { ... } }`. The `type` registry i
 | `cumulative_budget` | `{ "amount": int, "currency": "XXX" }` | The sum of consumed ledger entries under this grant MUST NOT exceed `amount` minor units. Enforced via the reservation lifecycle in section 12. |
 | `rate_limit` | `{ "max_requests": int, "window_seconds": int }` | At most `max_requests` protected requests per rolling `window_seconds` under this grant. |
 | `valid_window` | `{ "not_before": int, "not_after": int }` | Requests outside `[not_before, not_after]` unix seconds are denied. Narrower than `exp`; both apply. |
+| `spend_window` | `{ "amount": int, "currency": "XXX", "window_seconds": int }` | The sum of consumed ledger entries in the last `window_seconds` (rolling) plus live reservations and this request MUST NOT exceed `amount` minor units. Enforced inside the atomic reservation check per section 12. |
 
 ### 9.3 Combination and inheritance
 
@@ -202,7 +203,9 @@ Response `201`: `{ "request_id": "<id>", "consent_url": "<same-origin URL>", "ex
 
 ### 10.5 Status
 
-`GET <endpoints.grant_status>?request_id=<id>` (before issuance) or `?grant_id=<jti>` (after). Returns `{ "status": "pending|approved|denied|expired|active|revoked", "issued_at": <int?>, "expires_at": <int?> }`. Status responses are themselves signed per section 14.4 or are plainly informational; sites choose one and document it via `capabilities`.
+`GET <endpoints.grant_status>?request_id=<id>` (before issuance) or `?grant_id=<jti>` (after). Returns `{ "status": "pending|approved|denied|expired|active|revoked", "issued_at": <int?>, "expires_at": <int?> }`.
+
+Status responses are informational, unsigned JSON in draft 0.1. They carry no authority: enforcement checks revocation and expiry against current state on every request, so a forged or stale status response cannot grant access. Agents MUST treat status as advisory. A site MAY attach a signed status representation as an extension; unsigned informational status is the baseline every implementation must support. An unknown `request_id` or `grant_id` is `tg.grant.unknown`.
 
 ## 11. Protected requests
 
@@ -245,7 +248,7 @@ The site MUST perform these checks in order and stop at the first failure:
 6. Revocation and lifecycle state → `tg.grant.revoked`.
 7. Key binding: `keyid` equals `cnf.jkt` and the signature verifies under the resolved key → `tg.request.signature_invalid` or `tg.request.key_mismatch`.
 8. Replay: `nonce` not seen within the window for this grant → `tg.request.replay_detected`.
-9. Idempotency: a prior request with the same `Idempotency-Key` and grant returns the stored outcome instead of re-executing → `tg.request.idempotency_conflict` if the same key was used with a different operation. The stored comparison digest covers the operation (method, target URI, content digest, grant), not the signature base, because a retried signature has a fresh nonce.
+9. Idempotency: a prior request with the same `Idempotency-Key` and grant returns the stored outcome instead of re-executing → `tg.request.idempotency_conflict` if the same key was used with a different operation. The stored comparison digest covers the operation (method, target URI, content digest, grant), not the signature base, because a retried signature has a fresh nonce. A prior record with the same operation digest but no outcome yet is `tg.request.idempotency_in_flight`.
 10. Permission: the request's action is covered by `tg.permissions` → `tg.request.permission_denied`.
 11. Resource: every touched resource selector is listed and owned by the grant's user context → `tg.request.resource_denied`.
 12. Constraints: all `tg.constraints` pass against authoritative state → `tg.constraint.violated` (with the failing constraint in `detail`).
@@ -257,13 +260,14 @@ Any required check the site cannot perform (signature verification infrastructur
 
 - The site caches `(jti, nonce)` pairs for the maximum signature window plus tolerance. A repeat nonce is replay and denied.
 - `Idempotency-Key` dedupes logical operations, not transport retries only: a second request with the same key and an identical operation digest (method, target URI, `Content-Digest` value, grant `jti`) returns the stored response without re-executing; the same key with a different operation digest is `tg.request.idempotency_conflict`.
+- Mutating endpoints MUST claim the `(grant jti, Idempotency-Key)` pair atomically at lookup time, before the operation executes. The claim inserts a record in a pending (outcome-absent) state; a concurrent duplicate claim observes the existing record and MUST NOT execute a second time. A pending record with the same operation digest but no stored outcome answers `tg.request.idempotency_in_flight` (409; the caller retries the lookup after the in-flight request completes). A pending record abandoned by a crashed request MAY be reclaimed after a site-defined TTL.
 - Every request carries `Idempotency-Key` (it is a fixed covered component). Non-mutating requests may reuse a key freely since no dedupe record is stored for them unless the endpoint creates one; mutating endpoints MUST store and consult dedupe records.
 
 ## 12. Spending semantics
 
 - Amounts are integer minor units plus ISO 4217 currency. There are no fractional minor units.
 - The ledger is authoritative server state. A spending request proceeds as:
-  1. `reserve`: atomically check the constraint set and the grant's remaining `cumulative_budget` headroom and insert a reservation entry. Atomicity is REQUIRED: the headroom check and the reservation insert are one operation, so two concurrent requests cannot both observe the same headroom.
+  1. `reserve`: atomically check the constraint set and the grant's remaining `cumulative_budget` and `spend_window` headroom and insert a reservation entry. Atomicity is REQUIRED: the headroom check and the reservation insert are one operation, so two concurrent requests cannot both observe the same headroom. For `spend_window`, headroom is the window limit minus consumed-in-window minus live reservations.
   2. `consume`: on successful operation, the reservation converts to a consumed entry.
   3. `release`: on failure or abandonment, the reservation converts to a released entry and its headroom returns.
 - Reservations expire. A reservation not consumed or released within a site-defined TTL (RECOMMENDED: 300 seconds) releases automatically.
@@ -276,13 +280,17 @@ Any required check the site cannot perform (signature verification infrastructur
 - `exp` is a hard stop: an expired grant is denied at enforcement with `tg.grant.expired`. Enforcement-time checks are authoritative; agents MUST NOT rely on cached validity.
 - Revocation: the site MAY revoke a grant at any time (user action, risk signal, admin). Revocation takes effect at the next enforcement check; the maximum acceptable staleness is zero for enforcement — the check runs against current revocation state, not a snapshot. The agent-facing `grant_status` endpoint MAY cache status for at most 60 seconds.
 - If the revocation store or grant store is unavailable, enforcement fails closed (`tg.internal.unavailable`).
+- `POST <endpoints.grant_revocation>`: body `{ "grant_id": "<jti>", "reason": "<string?>" }` (`spec/schemas/grant-revocation.schema.json`). Two caller models exist:
+  - **Agent self-revocation**: the agent sends the revocation call as a section 11 protected request presenting the grant whose `jti` equals the body's `grant_id`. A bound grant may always revoke itself; no additional permission is required. A grant that fails verification cannot revoke anything.
+  - **Site-initiated**: the site's own authenticated surfaces (user settings, admin tooling, risk systems) revoke through host-side calls; authentication is site-defined and outside this specification.
+  A site that implements neither MUST deny every call with `tg.authorization.denied`. Unknown `grant_id` is `tg.grant.unknown`; an already-revoked grant returns the same `tg.grant.unknown`.
 - Key rotation: site signing keys rotate by publishing new keys in `signing_keys` while keeping the old `kid` valid for verification of outstanding grants until they expire. Agent keys rotate by issuing a new grant bound to the new `jkt`; a grant is never re-bound mid-flight. `grant_status` exposes whether a key rotation invalidated outstanding grants.
 
 ## 14. Receipts
 
 ### 14.1 Contents
 
-Every protected request returns a receipt. A receipt is a compact JWS signed by a site key from `signing_keys`, `typ: "trailgate-receipt+jwt"`, containing:
+Every protected request returns a receipt. The site MUST deliver the receipt in the `trailgate-receipt` response header as a compact JWS signed by a site key from `signing_keys`, `typ: "trailgate-receipt+jwt"`, containing:
 
 | Claim | Meaning |
 | --- | --- |
@@ -323,6 +331,7 @@ The site records audit events for security-relevant transitions. Required event 
 | `request.authenticated` | Signature verification passed | `jti`, `request_digest`, `nonce` |
 | `request.denied` | Any denial | `jti`, `code`, `stage` |
 | `reservation.created/consumed/released` | Ledger transitions | `jti`, `amount`, `currency`, `reservation_id` |
+| `idempotency.record_failed` | Outcome write failed after a successful claim; the pending record would answer `tg.request.idempotency_in_flight` to retries until reclaimed | `jti`, `detail` |
 | `key.rotated` | Site or agent key rotation event | `old_jkt`, `new_jkt` |
 
 Events are append-only, timestamped, and retained per site policy. The audit mechanism itself is implementation-defined; the event vocabulary is the contract.
@@ -338,12 +347,13 @@ Error responses use `spec/schemas/error.schema.json`: `{ "error": { "code": "tg.
 - Sites MUST treat grant contents, nonces, and idempotency keys as untrusted input at parse time even though they are signed.
 - A compromised agent key is contained by: grant expiry, per-grant budgets, resource scoping, revocation, and receipts for forensics. None of these prevents misuse before revocation.
 - TLS is REQUIRED on every endpoint and the discovery document. No downgrade path exists in the protocol.
+- Sites SHOULD bound protected-request size: reject oversized bodies or header sets before signature verification with `tg.request.too_large`. Cheap rejection at the edge, before any cryptographic or storage work, is the protocol-level defense against request-flooding.
 
 ## 18. Registration notes
 
 - `/.well-known/trailgate` is unregistered; registration is tracked as an open issue.
 - `trailgate-grant`, `trailgate-receipt` JWT `typ` values are unregistered media-type suffixes; collision risk is noted.
-- Custom headers `trailgate-grant`, `trailgate-agent` use the deprecated `X-`-style avoidance convention: lowercase descriptive names per RFC 9110 field naming.
+- Custom headers `trailgate-grant`, `trailgate-receipt`, `idempotency-key` use the deprecated `X-`-style avoidance convention: lowercase descriptive names per RFC 9110 field naming.
 
 ## 19. Open issues
 

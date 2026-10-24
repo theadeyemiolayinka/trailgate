@@ -107,6 +107,12 @@ export interface GrantRegistry extends RevocationChecker {
 
 export type ReservationState = 'reserved' | 'consumed' | 'released';
 
+/** A `spend_window` limit evaluated inside the atomic reservation (spec section 9.2). */
+export interface SpendWindowLimit {
+  limit: Money;
+  windowSeconds: number;
+}
+
 export interface Reservation {
   reservationId: string;
   grantId: string;
@@ -133,6 +139,13 @@ export interface SpendingLedger extends Ledger {
     grantId: string;
     amount: Money;
     budgets: readonly Money[];
+    /**
+     * `spend_window` limits the reservation must also satisfy (spec section
+     * 9.2): `consumed` in each window plus live `reserved` plus `amount` must
+     * not exceed `limit`. Checked inside the same atomic operation as the
+     * lifetime budgets.
+     */
+    spendWindows?: readonly SpendWindowLimit[];
     now: number;
     ttlSeconds: number;
   }): Promise<Reservation>;
@@ -164,13 +177,29 @@ export interface StoredIdempotencyRecord extends IdempotencyRecord {
   outcome?: StoredOutcome;
 }
 
+/** Result of an atomic idempotency claim (spec section 11.4). */
+export type IdempotencyClaim =
+  | { kind: 'claimed' }
+  | { kind: 'existing'; record: StoredIdempotencyRecord }
+  | { kind: 'conflict' };
+
 export interface RequestIdempotencyStore extends IdempotencyStore {
   lookup(grantId: string, key: string): Promise<StoredIdempotencyRecord | undefined>;
   /**
-   * Persists the outcome for a key after the operation completes.
-   * Implementations MUST NOT overwrite a record whose `requestDigest`
-   * differs. A real store SHOULD claim the key at lookup time (unique
-   * constraint) so concurrent duplicates cannot both execute.
+   * Atomically claims `(grantId, key)` before the operation executes (spec
+   * section 11.4 claim-at-lookup). MUST insert a pending record (no outcome)
+   * if absent and return `claimed`; MUST return `existing` with the stored
+   * record when a record with the same `requestDigest` is present; MUST
+   * return `conflict` when a record with a different `requestDigest` is
+   * present. A unique constraint or equivalent serialization is REQUIRED:
+   * two concurrent claims for the same pair must not both return `claimed`.
+   */
+  claim(grantId: string, key: string, requestDigest: string): Promise<IdempotencyClaim>;
+  /**
+   * Persists the outcome for a key after the operation completes, filling in
+   * the pending record `claim` created (or inserting one for callers that
+   * skipped `claim`). Implementations MUST NOT overwrite a record whose
+   * `requestDigest` differs.
    */
   record(
     grantId: string,
@@ -200,13 +229,12 @@ export interface AuditSink {
 }
 
 /**
- * Caller authorization for the provisional grant-revocation endpoint.
- * The endpoint's request format is not yet specified (no schema in spec
- * draft 0.1); this callback lets the host decide who may revoke. Returning
- * undefined denies. When unconfigured, the endpoint denies every call.
- *
- * @provisional Pending a normative revocation request schema and caller
- * model in the spec; raise changes through D0.
+ * Caller authorization for the `grant_revocation` endpoint (spec section
+ * 13). The ratified caller model gives every bound grant the right to
+ * revoke itself by presenting the revocation call as a section 11 signed
+ * request; this callback covers every other caller (site-authenticated
+ * surfaces, admin tooling). Returning undefined denies. When unconfigured,
+ * unsigned callers are denied but agent self-revocation still works.
  */
 export type RevocationAuthorizer = (
   req: HostRequest,

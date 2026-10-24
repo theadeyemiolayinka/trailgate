@@ -10,6 +10,7 @@ export const SCHEMA_IDS = {
   receipt: 'urn:trailgate:schemas:receipt',
   error: 'urn:trailgate:schemas:error',
   auditEvent: 'urn:trailgate:schemas:audit-event',
+  grantRevocation: 'urn:trailgate:schemas:grant-revocation',
 } as const;
 
 export type SchemaId = (typeof SCHEMA_IDS)[keyof typeof SCHEMA_IDS];

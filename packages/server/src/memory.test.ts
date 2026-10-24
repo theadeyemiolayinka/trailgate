@@ -120,6 +120,38 @@ describe('in-memory ledger', () => {
     assert.equal(second.state, 'reserved');
   });
 
+  it('enforces spend_window inside the atomic reserve', async () => {
+    const ledger = createInMemoryLedger(() => 1000);
+    const windows = [{ limit: USD(5000), windowSeconds: 3600 }];
+    await ledger.reserve({
+      reservationId: 'rsv_1',
+      grantId: 'grt_1',
+      amount: USD(4000),
+      budgets: [],
+      spendWindows: windows,
+      now: 1000,
+      ttlSeconds: 300,
+    });
+    await assert.rejects(
+      ledger.reserve({
+        reservationId: 'rsv_2',
+        grantId: 'grt_1',
+        amount: USD(2000),
+        budgets: [],
+        spendWindows: windows,
+        now: 1000,
+        ttlSeconds: 300,
+      }),
+      (err: unknown) =>
+        err instanceof TrailGateError &&
+        err.code === Codes.CONSTRAINT_VIOLATED &&
+        err.detail?.['type'] === 'spend_window',
+    );
+    await ledger.consume('rsv_1', 1000);
+    assert.equal(await ledger.consumedInWindow?.('grt_1', 'USD', 3600, 1000), 4000);
+    assert.equal(await ledger.consumedInWindow?.('grt_1', 'USD', 100, 2000), 0);
+  });
+
   it('tracks budgets per currency', async () => {
     const ledger = createInMemoryLedger(() => 1000);
     await ledger.reserve({
@@ -170,6 +202,33 @@ describe('in-memory idempotency store', () => {
     assert.equal(stored?.requestDigest, 'digest-1');
     assert.equal(stored?.outcome?.status, 200);
     assert.equal(await store.lookup('grt_2', 'idem_1'), undefined);
+  });
+
+  it('claims a key once: second claim sees the pending record', async () => {
+    const store = createInMemoryIdempotencyStore();
+    assert.deepEqual(await store.claim('grt_1', 'k', 'digest-1'), { kind: 'claimed' });
+    const second = await store.claim('grt_1', 'k', 'digest-1');
+    assert.equal(second.kind, 'existing');
+    const conflict = await store.claim('grt_1', 'k', 'different-digest');
+    assert.equal(conflict.kind, 'conflict');
+  });
+
+  it('record fills the pending claim row and rejects digest mismatches', async () => {
+    const store = createInMemoryIdempotencyStore();
+    await store.claim('grt_1', 'k', 'digest-1');
+    await store.record('grt_1', 'k', {
+      requestDigest: 'digest-1',
+      outcome: { status: 201 },
+    });
+    const stored = await store.lookup('grt_1', 'k');
+    assert.equal(stored?.outcome?.status, 201);
+    await assert.rejects(
+      store.record('grt_1', 'k', {
+        requestDigest: 'other',
+        outcome: { status: 200 },
+      }),
+      (err) => (err as TrailGateError).code === Codes.REQUEST_IDEMPOTENCY_CONFLICT,
+    );
   });
 });
 

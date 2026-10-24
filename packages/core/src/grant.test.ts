@@ -7,7 +7,7 @@ import {
   signCompactJws,
 } from '../../test-fixtures/src/index.ts';
 import { Codes, TrailGateError } from './errors.ts';
-import { GRANT_TYP, parseGrant, verifyGrant } from './grant.ts';
+import { GRANT_TYP, parseGrant, signGrant, verifyGrant } from './grant.ts';
 import type { KeyResolver } from './ports.ts';
 
 const site = generateEd25519KeyPair();
@@ -147,6 +147,19 @@ describe('verifyGrant', () => {
     });
     await expectCode(Codes.GRANT_MALFORMED, () => verifyGrant(token, DEPS));
     await verifyGrant(token, { ...DEPS, knownCriticalFields: ['mystery_extension'] });
+  });
+});
+
+describe('signGrant', () => {
+  it('produces grants that pass verification', async () => {
+    const payload = makeGrantPayload({ jkt: agent.jkt, iat: NOW - 60, exp: NOW + 3600 });
+    const token = await signGrant(payload, { privateJwk: site.privateJwk, kid: SITE_KID });
+    const verified = await verifyGrant(token, DEPS);
+    assert.equal(verified.jti, payload.jti);
+    const { header } = parseGrant(token);
+    assert.equal(header['typ'], GRANT_TYP);
+    assert.equal(header['kid'], SITE_KID);
+    assert.equal(header['alg'], 'EdDSA');
   });
 });
 

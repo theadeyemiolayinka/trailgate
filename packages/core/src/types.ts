@@ -126,6 +126,7 @@ export type AuditEventType =
   | 'reservation.created'
   | 'reservation.consumed'
   | 'reservation.released'
+  | 'idempotency.record_failed'
   | 'key.rotated';
 
 export interface AuditEvent {

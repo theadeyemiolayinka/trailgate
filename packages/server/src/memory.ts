@@ -108,7 +108,24 @@ export function createInMemoryIdempotencyStore(): RequestIdempotencyStore {
   const records = new Map<string, IdempotencyEntry>();
   return {
     lookup: async (grantId, key) => records.get(`${grantId}:${key}`),
+    claim: async (grantId, key, requestDigest) => {
+      const existing = records.get(`${grantId}:${key}`);
+      if (existing !== undefined) {
+        return existing.requestDigest === requestDigest
+          ? { kind: 'existing', record: existing }
+          : { kind: 'conflict' };
+      }
+      records.set(`${grantId}:${key}`, { requestDigest });
+      return { kind: 'claimed' };
+    },
     record: async (grantId, key, record) => {
+      const existing = records.get(`${grantId}:${key}`);
+      if (existing !== undefined && existing.requestDigest !== record.requestDigest) {
+        throw new TrailGateError(
+          Codes.REQUEST_IDEMPOTENCY_CONFLICT,
+          'idempotency key was used for a different operation',
+        );
+      }
       records.set(`${grantId}:${key}`, record);
     },
   };
@@ -165,7 +182,25 @@ export function createInMemoryLedger(now: () => number): SpendingLedger {
   return {
     consumedMinorUnits: async (grantId, currency) => sum(consumed, grantId, currency),
     reservedMinorUnits: async (grantId, currency) => sum(liveReservations(), grantId, currency),
-    reserve: async ({ reservationId, grantId, amount, budgets, now: at, ttlSeconds }) => {
+    consumedInWindow: async (grantId, currency, windowSeconds, now) =>
+      consumed
+        .filter(
+          (entry) =>
+            entry.grantId === grantId &&
+            entry.amount.currency === currency &&
+            entry.at > now - windowSeconds &&
+            entry.at <= now,
+        )
+        .reduce((total, entry) => total + entry.amount.amount, 0),
+    reserve: async ({
+      reservationId,
+      grantId,
+      amount,
+      budgets,
+      spendWindows,
+      now: at,
+      ttlSeconds,
+    }) => {
       const held = sum(liveReservations(), grantId, amount.currency);
       const spent = sum(consumed, grantId, amount.currency);
       for (const budget of budgets) {
@@ -180,6 +215,26 @@ export function createInMemoryLedger(now: () => number): SpendingLedger {
               reserved: held,
             },
           );
+        }
+      }
+      for (const window of spendWindows ?? []) {
+        const spentInWindow = consumed
+          .filter(
+            (entry) =>
+              entry.grantId === grantId &&
+              entry.amount.currency === amount.currency &&
+              entry.at > at - window.windowSeconds &&
+              entry.at <= at,
+          )
+          .reduce((total, entry) => total + entry.amount.amount, 0);
+        if (spentInWindow + held + amount.amount > window.limit.amount) {
+          throw new TrailGateError(Codes.CONSTRAINT_VIOLATED, 'spend_window would be exceeded', {
+            type: 'spend_window',
+            limit: window.limit,
+            window_seconds: window.windowSeconds,
+            consumed: spentInWindow,
+            reserved: held,
+          });
         }
       }
       const reservation: Reservation = {

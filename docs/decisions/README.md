@@ -14,3 +14,4 @@ A contract-changing decision follows the process in ADR 0002.
 | 0006 | Constraint model and spending semantics | accepted |
 | 0007 | Consent flow shape | accepted |
 | 0008 | Draft 0.1 errata: algorithm identifiers and Idempotency-Key | accepted |
+| 0009 | Contract ratifications: receipts, status, revocation, idempotency, spend_window, error codes | accepted |

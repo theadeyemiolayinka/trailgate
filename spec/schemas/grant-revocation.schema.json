@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trailgate:schemas:grant-revocation",
+  "title": "TrailGate grant revocation request",
+  "description": "Body of POST <endpoints.grant_revocation> (spec/protocol.md section 13).",
+  "type": "object",
+  "required": ["grant_id"],
+  "properties": {
+    "grant_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The jti of the grant to revoke"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Optional human-readable revocation reason, recorded in the audit trail"
+    }
+  },
+  "additionalProperties": false
+}

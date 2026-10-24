@@ -11,6 +11,7 @@ import {
   TrailGateError,
 } from '@trailgate/core';
 import type { ResolvedServerConfig } from './config.ts';
+import { assertRequestLimits, verifyAgentRequest } from './enforcement.ts';
 import { randomId } from './ids.ts';
 import type { GrantRequestRecord } from './ports.ts';
 import { signGrantJwt } from './signing.ts';
@@ -342,10 +343,7 @@ export async function redeemGrant(
   if (!schemaRegistry().validate(SCHEMA_IDS.grant, payload)) {
     throw new TrailGateError(Codes.INTERNAL_ERROR, 'issued grant failed schema validation');
   }
-  const token = await signGrantJwt(
-    payload as unknown as Record<string, unknown>,
-    config.signingKey,
-  );
+  const token = await signGrantJwt(payload as unknown as GrantPayload, config.signingKey);
   await config.stores.grants.insert({
     jti,
     issuedAt: now,
@@ -380,7 +378,7 @@ export async function grantStatus(
   if (query.request_id !== undefined) {
     const record = await config.stores.grantRequests.get(query.request_id);
     if (record === undefined) {
-      throw new TrailGateError(Codes.REQUEST_MALFORMED, 'unknown request_id');
+      throw new TrailGateError(Codes.GRANT_UNKNOWN, 'unknown request_id');
     }
     if ((record.status === 'pending' || record.status === 'approved') && record.expiresAt <= now) {
       await config.stores.grantRequests.transition(record.requestId, record.status, {
@@ -399,7 +397,7 @@ export async function grantStatus(
   if (query.grant_id !== undefined) {
     const grant = await config.stores.grants.get(query.grant_id);
     if (grant === undefined) {
-      throw new TrailGateError(Codes.REQUEST_MALFORMED, 'unknown grant_id');
+      throw new TrailGateError(Codes.GRANT_UNKNOWN, 'unknown grant_id');
     }
     const status =
       grant.status === 'revoked' ? 'revoked' : grant.expiresAt <= now ? 'expired' : 'active';
@@ -424,7 +422,7 @@ export async function revokeGrant(
     at: config.clock.now(),
   });
   if (revoked === undefined) {
-    throw new TrailGateError(Codes.REQUEST_MALFORMED, 'unknown or already revoked grant');
+    throw new TrailGateError(Codes.GRANT_UNKNOWN, 'unknown or already revoked grant');
   }
   await config.stores.audit.record({
     event: 'grant.revoked',
@@ -436,30 +434,48 @@ export async function revokeGrant(
 }
 
 /**
- * @provisional POST handler for the discovery `grant_revocation` endpoint.
- * Draft 0.1 defines the endpoint's existence but not its request schema or
- * caller model; this implementation requires a `revocationAuthorizer` in the
- * server config and denies every call when none is configured. Subject to
- * change when the spec defines the flow.
+ * POST handler for the discovery `grant_revocation` endpoint (spec section
+ * 13). Two caller models: agent self-revocation via a section 11 signed
+ * request presenting the same grant, or a site-configured
+ * `revocationAuthorizer` for other callers. Denies when neither applies.
  */
 export async function handleRevocationRequest(
   req: HostRequest,
   config: ResolvedServerConfig,
 ): Promise<HostResponse> {
+  assertRequestLimits(req, config);
   const body = parseJsonBody(req.body);
-  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-    throw new TrailGateError(Codes.REQUEST_MALFORMED, 'revocation body must be a json object');
+  if (!schemaRegistry().validate(SCHEMA_IDS.grantRevocation, body)) {
+    throw new TrailGateError(Codes.REQUEST_MALFORMED, 'revocation body failed schema validation', {
+      schema: schemaRegistry().errors(SCHEMA_IDS.grantRevocation),
+    });
   }
-  const grantId = requireString((body as Record<string, unknown>)['grant_id'], 'grant_id');
-  const reason = (body as Record<string, unknown>)['reason'];
+  const { grant_id: grantId, reason } = body as { grant_id: string; reason?: string };
   const grant = await config.stores.grants.get(grantId);
   if (grant === undefined) {
-    throw new TrailGateError(Codes.REQUEST_MALFORMED, 'unknown grant_id');
+    throw new TrailGateError(Codes.GRANT_UNKNOWN, 'unknown grant_id');
+  }
+  if (req.headers['trailgate-grant'] !== undefined) {
+    // Agent self-revocation: the request must verify as a protected request
+    // presenting the grant being revoked. A failed verification denies.
+    const verified = await verifyAgentRequest(req, config);
+    if (verified.grant.jti !== grantId) {
+      throw new TrailGateError(
+        Codes.AUTHORIZATION_DENIED,
+        'the presented grant does not match grant_id',
+      );
+    }
+    await revokeGrant(
+      grantId,
+      { actor: `agent:${verified.grant.cnf.jkt}`, reason: reason ?? 'agent-initiated' },
+      config,
+    );
+    return { status: 200, body: { grant_id: grantId, status: 'revoked' } };
   }
   if (config.revocationAuthorizer === undefined) {
     throw new TrailGateError(
       Codes.AUTHORIZATION_DENIED,
-      'revocation endpoint requires a configured revocationAuthorizer',
+      'revocation endpoint requires a signed request or a configured revocationAuthorizer',
     );
   }
   const actor = await config.revocationAuthorizer(req, grant);
@@ -470,8 +486,7 @@ export async function handleRevocationRequest(
     grantId,
     {
       actor: actor.actor,
-      reason:
-        actor.reason ?? (typeof reason === 'string' && reason !== '' ? reason : 'unspecified'),
+      reason: actor.reason ?? (reason !== undefined && reason !== '' ? reason : 'unspecified'),
     },
     config,
   );

@@ -1,8 +1,8 @@
 # Security guarantees
 
-What `packages/core` does and does not guarantee at draft 0.1. Every claim below is
-bounded by what the test suite actually demonstrates; see the requirement-to-test matrix
-in `docs/security-review-0.1.md` for evidence per claim.
+What this repository does and does not guarantee at draft 0.1. Every claim below is
+bounded by what the test suite actually demonstrates; see the requirement-to-test
+matrix in `docs/security-review-0.1.md` for evidence per claim.
 
 This is an experimental protocol. Nothing here is formally verified, certified, or
 production-ready.
@@ -29,54 +29,99 @@ Given correctly implemented ports, `verifyProtectedRequest` enforces, in spec or
 10. Permission coverage, resource selector membership, and resource ownership against
     the grant `sub` (grants without `sub` cannot touch owned resources).
 11. Conjunctive constraint evaluation; unknown constraint types and unavailable
-    evaluators deny.
+    evaluators deny. Registered types: `max_amount`, `cumulative_budget`, `rate_limit`,
+    `valid_window`, `spend_window`.
 12. Site policy hook (`SitePolicy`).
 13. Fail-closed dependency handling: port failures map to `tg.internal.unavailable`
     (or `tg.internal.error` for policy crashes); registered protocol errors pass
     through unchanged.
 
-`verifyGrant`, `validateDiscoveryDocument`, and `verifyReceipt` similarly enforce their
-respective schema, signature, audience, and `critical` rules.
+`verifyGrant`, `signGrant`, `validateDiscoveryDocument`, `signReceipt`, and
+`verifyReceipt` similarly enforce their respective schema, signature, audience, and
+`critical` rules.
+
+## Guaranteed by the server SDK (implemented and tested)
+
+`packages/server` wires the pipeline over injected stores and adds:
+
+- Full grant lifecycle: request intake with vocabulary and scope checks, consent
+  decision, single-use redemption via CAS transition, status, revocation.
+- Revocation caller model (spec section 13): a bound grant revokes itself through a
+  section 11 signed request; other callers need a configured `revocationAuthorizer`;
+  unsigned calls deny by default.
+- Claim-at-lookup idempotency (spec section 11.4): `(grant jti, Idempotency-Key)` is
+  claimed atomically before the handler runs; completed records replay, pending
+  records answer `tg.request.idempotency_in_flight`, mismatched digests answer
+  `tg.request.idempotency_conflict`. A failed outcome write is audited as
+  `idempotency.record_failed`.
+- Spending lifecycle: atomic `reserve` against `cumulative_budget` and `spend_window`
+  headroom, consume on success, release on failure, refunds, reservation TTL.
+- Signed receipts on allowed and parseable-denied decisions, delivered in the
+  `trailgate-receipt` header (spec section 14.1).
+- Request size bounds (`maxBodyBytes`, `maxHeadersBytes`) rejected before any
+  cryptographic or storage work with `tg.request.too_large`.
+- Denial behavior on early-malformed requests is the error envelope only: no receipt
+  is issued when no grant or signature base could be bound.
+
+## Guaranteed by the agent SDK (implemented and tested)
+
+- Discovery: HTTPS origin normalization, no redirect following, schema and
+  same-origin endpoint validation, version negotiation, `critical` handling,
+  `Cache-Control`-aware caching capped at 24 h.
+- Consent: `redirect_uri` exact matching, `state` binding, S256 verifier handling
+  (verifier never leaves the client).
+- Signed requests with the fixed covered components; receipts verified against the
+  exact signature base sent.
+- Key custody: `AgentSigner` has no export method; private key material never
+  enters model-visible surfaces.
 
 ## Guaranteed only if the port is correct
 
-Core's guarantees for these properties reduce to the port contract. A weak
+The pipeline's guarantees for these properties reduce to the port contract. A weak
 implementation silently removes the protection:
 
+- `GrantRequestStore.transition` must be a real compare-and-swap, or redemption is
+  not single-use.
 - `NonceStore.claim` must be atomic and honor TTL, or replay protection does not exist.
-- `IdempotencyStore` must be atomic, or concurrent retries execute twice.
-- `RevocationChecker` must reflect real revocation state with the staleness bound the
-  deployment requires.
-- `KeyResolver` must return authentic keys; a resolver that trusts embedded key material
-  reintroduces key substitution.
-- `Ledger` and `RateLimiter` must report authoritative totals.
-- `ResourceOwnerResolver` must report authoritative ownership.
+- `RequestIdempotencyStore.claim` must be atomic, or concurrent duplicates execute
+  twice.
+- `GrantRegistry.revoke`/`isRevoked` must reflect current state, or revoked grants
+  keep working.
+- `KeyResolver` must return authentic keys; a resolver that trusts embedded key
+  material reintroduces key substitution.
+- `SpendingLedger.reserve` must check and insert atomically, or concurrent requests
+  overspend. `consumedInWindow` must be authoritative for `spend_window`.
+- `RateLimiter` and `ResourceOwnerResolver` must report authoritative state.
+- `AuditSink` must be append-only, or forensic claims are void.
 
-## Not guaranteed by core (no implementation exists)
+`@trailgate/conformance` (`runPortContractSuite`) exercises these contracts against
+any implementation. Run it against production stores before deploying.
 
-- Atomic spending: reservations, consume, release, refund, rollback, reconciliation,
-  and concurrent-budget enforcement. The `Ledger` port is read-only; section 12
-  semantics are entirely the server layer's job.
-- Consent flow security: redirect URI exact matching, `state` CSRF binding, single-use
-  authorization codes, challenge verification.
-- Discovery transport: HTTPS fetching, redirect policy, DNS/TLS trust, cache freshness.
-- Key rotation, secure storage at rest, and stale-key lifecycle.
-- Audit log integrity, append-only semantics, retention, and redaction.
-- Denial-of-service controls at the transport layer: body limits, endpoint quotas,
-  parser resource limits.
-- The `rate_limit` constraint's window semantics and counting atomicity.
-- ES256 grant verification end-to-end (the algorithm is accepted; no integration test
-  exercises an ES256-signed grant).
+## Not implemented anywhere in this repository
+
+- OS-keystore or hardware key custody for agent keys (`AgentKeyProvider` interface is
+  ready; only software and file providers ship).
+- Site signing key custody: `signingKeys` accepts JWKs in config. ExampleShop stores
+  the site JWK in SQLite for demo continuity; production sources keys from a KMS.
+- Framework adapters beyond `node:http` (Express/Fastify/Hono). The
+  `HostRequest`/`HostResponse` boundary is the integration point.
+- Signed `grant_status` responses (permitted extension, not required; status is
+  unsigned informational JSON and carries no authority).
+- Discovery document signing (relies on TLS + same-origin; open spec issue).
+- Grant refresh and post-issuance attenuation (open spec issues).
+- Transport-level DoS controls beyond request-size bounds: connection quotas,
+  global rate shaping, and parser resource limits are the host/edge layer's job.
 
 ## What a receipt does and does not prove
 
-`verifyReceipt` establishes that the named issuer signed a decision for a grant, bound
-optionally to a specific request digest. It does not establish that money moved, that
-goods shipped, that the decision was correct, or that the site behaved honestly. A site
-can sign a false receipt; the receipt only makes the claim attributable.
+`verifyReceipt` establishes that the named issuer signed a decision for a grant,
+bound optionally to a specific request digest. It does not establish that money
+moved, that goods shipped, that the decision was correct, or that the site behaved
+honestly. A site can sign a false receipt; the receipt only makes the claim
+attributable.
 
 ## Error and disclosure guarantees
 
 Protocol errors carry registered `tg.*` codes and do not include private keys,
-credentials, or internal infrastructure detail. Port exceptions are wrapped so driver
-messages and hostnames do not reach the response.
+credentials, or internal infrastructure detail. Port exceptions are wrapped so
+driver messages and hostnames do not reach the response.

@@ -1,8 +1,9 @@
 # Integrating TrailGate into a website
 
 Draft 0.1 foundation. This guide describes the intended setup for the Server
-SDK. Items marked **provisional** depend on spec questions that are not yet
-decided; items under "Not yet implemented" are absent and must not be assumed.
+SDK. The provisional surfaces from early drafts were ratified in ADR 0009
+(`docs/decisions/0009-contract-ratifications.md`); items under "Not yet
+implemented" are absent and must not be assumed.
 
 The SDK never replaces the site's authentication, consent surface, or business
 logic. It exposes framework-neutral `HostRequest`/`HostResponse` values; the
@@ -48,7 +49,7 @@ const tg = createTrailGateServer({
 | consent page (host UI) | `tg.getConsent(requestId)` then `tg.decideConsent(...)` | section 10.3 |
 | `POST /tg/grant-redemption` | `tg.handleRedemption(req)` | section 10.4 |
 | `GET /tg/grant-status` | `tg.handleStatus(req)` | section 10.5 |
-| `POST /tg/grant-revocation` | `tg.handleRevocation(req)` | provisional |
+| `POST /tg/grant-revocation` | `tg.handleRevocation(req)` | section 13 |
 | site admin / user settings | `tg.revokeGrant(jti, { reason, actor })` | section 13 |
 | protected routes | `tg.protect(route, handler)` | section 11 |
 
@@ -95,13 +96,16 @@ whole spec section 11.3 checklist, then:
 
 - records an `request.authenticated` audit event and counts the request for
   the `rate_limit` constraint,
-- serves the stored outcome on an idempotent replay,
-- reserves `amount` against `cumulative_budget` when the route declares one,
-  consumes on a handler response below 400, releases on a throw or a 400+,
-- stores an idempotency record for mutating routes (`mutating: false` opts out
-  for read-only endpoints),
+- claims `(grant jti, Idempotency-Key)` atomically before executing for
+  mutating routes: a completed record replays its stored outcome, a pending
+  record answers `tg.request.idempotency_in_flight`, and a mismatched
+  operation digest answers `tg.request.idempotency_conflict`
+  (`mutating: false` opts out for read-only endpoints),
+- reserves `amount` against `cumulative_budget` and `spend_window` headroom
+  when the route declares one, consumes on a handler response below 400,
+  releases on a throw or a 400+,
 - returns a signed receipt in the `trailgate-receipt` response header
-  (**provisional** delivery channel, see "Open questions"),
+  (spec section 14.1),
 - returns signed denial receipts when the request was parseable enough to
   bind one (spec section 14.4).
 
@@ -125,7 +129,9 @@ HTTP status.
 | `resourceOwners` | | none | `ownerOf(selector)` for cross-user isolation. Required for resource-scoped routes. |
 | `resourcePolicy` | | accept all | Intake-time selector namespace check. |
 | `refineScope` | | pass-through | Narrows requested scope; SDK enforces subset rules. |
-| `revocationAuthorizer` | | deny all | Authorizes `handleRevocation` calls (provisional). |
+| `revocationAuthorizer` | | deny unsigned | Authorizes `handleRevocation` calls not carrying a signed self-revocation request. A bound grant can always revoke itself without it. |
+| `maxBodyBytes` | | 64 KiB | Body cap on protocol and protected requests; over limit answers `tg.request.too_large` before verification. |
+| `maxHeadersBytes` | | 16 KiB | Combined header-name+value cap, same handling. |
 | `clock` | | system | Injectable for tests. |
 | `toleranceSeconds` | | 60 | Max 120 (spec cap). |
 | `grantRequestTtlSeconds` | | 900 | Max 900 (spec cap). |
@@ -145,8 +151,8 @@ single-process demos only. For deployment, implement the ports in
 | `GrantRegistry` | `revoke` atomic; `isRevoked` reads current state at every enforcement pass. |
 | `AgentKeyDirectory` | Maps agent `jkt` to registered public JWKs. |
 | `NonceStore` | `claim` must be an atomic insert-if-absent (unique key). |
-| `RequestIdempotencyStore` | `record` must not overwrite a record with a different operation digest; claim at lookup time to stop concurrent duplicates. |
-| `SpendingLedger` | `reserve` must check headroom and insert in one atomic operation; TTL release for abandoned reservations. |
+| `RequestIdempotencyStore` | `claim` must be an atomic insert-if-absent returning `claimed`/`existing`/`conflict`; `record` must not overwrite a record with a different operation digest. |
+| `SpendingLedger` | `reserve` must check `cumulative_budget` and `spend_window` headroom and insert in one atomic operation; TTL release for abandoned reservations. `consumedInWindow` is required when grants carry `spend_window`. |
 | `RequestRateLimiter` | Rolling-window per-grant request count. |
 | `AuditSink` | Append-only; returns the event id embedded in receipts. |
 
@@ -167,7 +173,9 @@ Suggested schema per store. Times are integer unix seconds.
 - `nonces`: composite PK `(grant_id, nonce)`, `expires_at`; claim is insert
   or fail on conflict, plus expiry sweep.
 - `idempotency`: composite PK `(grant_id, key)`, `request_digest`, serialized
-  `outcome`.
+  `outcome` (NULL while pending), `created_at`. `claim` is
+  `INSERT ... ON CONFLICT DO NOTHING` of a pending row, then read back.
+  Pending rows may be reclaimed after a site-defined TTL.
 - `ledger`: consumed entries `(grant_id, amount, currency, at)` and
   reservations `(reservation_id, grant_id, amount, state, expires_at)`;
   `reserve` must run the headroom check and insert in one transaction.
@@ -191,34 +199,43 @@ Adapter rules that must hold on every framework:
 - `body` must be the exact received bytes; `Content-Digest` verification
   fails on re-encoded bodies.
 - Responses carry `content-type: application/json` and, on protected routes,
-  the `trailgate-receipt` header (provisional channel).
+  the `trailgate-receipt` header (spec section 14.1).
 
 TLS termination upstream is fine as long as the `url` seen by the SDK still
 matches the URI the agent signed (scheme and authority included).
 
-## Provisional surfaces
+## Ratified contract surfaces
 
-Pending D0 decisions; do not treat as normative.
+Settled by ADR 0009; no longer provisional.
 
-- `trailgate-receipt` response header as the receipt delivery channel.
-- `POST grant_revocation` body `{ grant_id, reason? }` gated by a configured
-  `revocationAuthorizer`. The endpoint denies every call when unconfigured.
-- `grant_status` returns plainly informational JSON; signed status is an open
-  spec question.
-- Error-code choices where draft 0.1 has no named code: unknown
-  `request_id`/`grant_id` (`tg.request.malformed`), redemption before consent
-  (`tg.authorization.denied`), S256 verifier mismatch
-  (`tg.authorization.denied`), expired grant request (`tg.grant.expired`),
-  unsupported protocol version in a grant request (`tg.grant.scope_rejected`).
+- `trailgate-receipt` response header is the normative receipt channel
+  (spec section 14.1).
+- `POST grant_revocation` takes `{ "grant_id", "reason"? }`
+  (`spec/schemas/grant-revocation.schema.json`). A bound grant revokes
+  itself by presenting the call as a section 11 signed request; other
+  callers need a configured `revocationAuthorizer`; when unconfigured,
+  unsigned calls deny.
+- `grant_status` is plainly informational unsigned JSON (spec section 10.5).
+  It carries no authority: enforcement re-checks revocation and expiry on
+  every request.
+- New codes in the registry: `tg.grant.unknown` (404, unknown request/grant
+  id), `tg.request.idempotency_in_flight` (409, pending record for the same
+  operation), `tg.request.too_large` (413, site size bounds).
 
 ## Not yet implemented
 
-- Idempotency pending-state records for in-flight duplicate suppression
-  (a lookup-then-record window remains; production stores must enforce
-  uniqueness).
-- `trailgate-agent` client-identification header (referenced in spec
-  section 18 but not profiled).
-- Signed grant-status responses.
+- Signed grant-status responses (permitted extension, not required).
 - Grant refresh and attenuation (open spec issues).
 - Framework adapters (Express/Fastify/Hono). `HostRequest`/`HostResponse` is
   deliberately thin; adapters belong to the host or a future helper package.
+  `node:http` is the only adapter exercised by the test suite.
+
+## Conformance
+
+`@trailgate/conformance` exports `runPortContractSuite(name, makeStores)`,
+which exercises the atomicity contracts above (CAS transitions, atomic nonce
+and idempotency claims, atomic ledger reserve with spend windows, audit
+append order) against any port implementation. Run it against production
+stores before deploying; a store that fails reintroduces the attack the
+port exists to prevent. ExampleShop's SQLite stores run the suite in
+`apps/example-shop/src/tg/conformance.test.ts`.

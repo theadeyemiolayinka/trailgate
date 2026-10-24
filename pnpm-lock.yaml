@@ -45,6 +45,9 @@ importers:
       '@trailgate/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@trailgate/conformance':
+        specifier: workspace:*
+        version: link:../../packages/conformance
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.5
@@ -91,6 +94,13 @@ importers:
         version: 7.0.2
 
   packages/conformance:
+    dependencies:
+      '@trailgate/core':
+        specifier: workspace:*
+        version: link:../core
+      '@trailgate/server':
+        specifier: workspace:*
+        version: link:../server
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

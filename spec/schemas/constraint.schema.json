@@ -36,6 +36,28 @@
       }
     },
     {
+      "if": { "properties": { "type": { "const": "spend_window" } } },
+      "then": {
+        "properties": {
+          "params": {
+            "type": "object",
+            "required": ["amount", "currency", "window_seconds"],
+            "properties": {
+              "amount": { "type": "integer", "minimum": 0 },
+              "currency": {
+                "type": "string",
+                "pattern": "^[A-Z]{3}$",
+                "description": "ISO 4217 currency code"
+              },
+              "window_seconds": { "type": "integer", "minimum": 1 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["params"]
+      }
+    },
+    {
       "if": { "properties": { "type": { "const": "valid_window" } } },
       "then": {
         "properties": {

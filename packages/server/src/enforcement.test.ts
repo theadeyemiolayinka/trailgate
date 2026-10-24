@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { describe, it } from 'node:test';
 import type { Jwk, KeyResolver } from '@trailgate/core';
-import { Codes, signRequest, TrailGateError, verifyReceipt } from '@trailgate/core';
+import {
+  Codes,
+  operationDigestOf,
+  signRequest,
+  TrailGateError,
+  verifyReceipt,
+} from '@trailgate/core';
 import { generateEd25519KeyPair, makeGrantPayload, signCompactJws } from '@trailgate/test-fixtures';
 import type { TrailGateServerOptions } from './config.ts';
 import { RECEIPT_HEADER } from './enforcement.ts';
@@ -274,6 +280,54 @@ describe('protected request enforcement', () => {
     assert.equal(errorCode(conflict), Codes.REQUEST_IDEMPOTENCY_CONFLICT);
   });
 
+  it('answers in_flight when a matching claim is still pending', async () => {
+    const server = makeServer();
+    const grant = await issueGrant(server);
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const key = randomIdem();
+    const req = await signedRequest(grant.token, { idempotencyKey: key });
+    // Simulate a concurrent request whose claim landed but has not completed.
+    const claim = await server.config.stores.idempotency.claim(
+      grant.jti,
+      key,
+      operationDigestOf(req, grant.jti),
+    );
+    assert.equal(claim.kind, 'claimed');
+    const res = await handler(req);
+    assert.equal(res.status, 409);
+    assert.equal(errorCode(res), Codes.REQUEST_IDEMPOTENCY_IN_FLIGHT);
+  });
+
+  it('rejects oversized requests before verification', async () => {
+    const server = makeServer({ maxBodyBytes: 1024 });
+    const grant = await issueGrant(server);
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const req = await signedRequest(grant.token, { body: 'x'.repeat(4096) });
+    const res = await handler(req);
+    assert.equal(res.status, 413);
+    assert.equal(errorCode(res), Codes.REQUEST_TOO_LARGE);
+  });
+
+  it('enforces spend_window end to end through the reserve path', async () => {
+    const server = makeServer();
+    const grant = await issueGrant(server, {
+      permissions: ['tg.wallet.charge'],
+      constraints: [
+        { type: 'spend_window', params: { amount: 5000, currency: 'USD', window_seconds: 3600 } },
+      ],
+    });
+    const charge = server.protect(
+      {
+        permission: 'tg.wallet.charge',
+        amount: { amount: 4000, currency: 'USD' },
+      },
+      okHandler,
+    );
+    assert.equal((await charge(await signedRequest(grant.token))).status, 200);
+    const second = await charge(await signedRequest(grant.token));
+    assert.equal(errorCode(second), Codes.CONSTRAINT_VIOLATED);
+  });
+
   it('enforces resource scope and cross-user isolation', async () => {
     const server = makeServer({
       resourceOwners: {
@@ -386,5 +440,60 @@ describe('forged and tampered requests', () => {
     });
     assert.equal(res.status, 400);
     assert.equal(errorCode(res), Codes.REQUEST_MALFORMED);
+  });
+});
+
+describe('grant revocation endpoint', () => {
+  it('lets a bound grant revoke itself via a signed request', async () => {
+    const server = makeServer();
+    const grant = await issueGrant(server);
+    const body = JSON.stringify({ grant_id: grant.jti, reason: 'agent done' });
+    const req = await signedRequest(grant.token, {
+      url: `${ISSUER}/tg/grant-revocation`,
+      body,
+    });
+    const res = await server.handleRevocation(req);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body, { grant_id: grant.jti, status: 'revoked' });
+    assert.equal(await server.config.stores.grants.isRevoked(grant.jti), true);
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const after = await handler(await signedRequest(grant.token));
+    assert.equal(errorCode(after), Codes.GRANT_REVOKED);
+  });
+
+  it('denies revocation presenting a different grant', async () => {
+    const server = makeServer();
+    const grant = await issueGrant(server);
+    const other = await issueGrant(server);
+    const req = await signedRequest(grant.token, {
+      url: `${ISSUER}/tg/grant-revocation`,
+      body: JSON.stringify({ grant_id: other.jti }),
+    });
+    const res = await server.handleRevocation(req);
+    assert.equal(errorCode(res), Codes.AUTHORIZATION_DENIED);
+    assert.equal(await server.config.stores.grants.isRevoked(other.jti), false);
+  });
+
+  it('denies unsigned calls without a configured authorizer', async () => {
+    const server = makeServer();
+    const grant = await issueGrant(server);
+    const res = await server.handleRevocation({
+      method: 'POST',
+      url: `${ISSUER}/tg/grant-revocation`,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ grant_id: grant.jti }),
+    });
+    assert.equal(errorCode(res), Codes.AUTHORIZATION_DENIED);
+    assert.equal(await server.config.stores.grants.isRevoked(grant.jti), false);
+  });
+
+  it('answers tg.grant.unknown for unknown ids', async () => {
+    const server = makeServer();
+    const res = await server.handleStatus({
+      method: 'GET',
+      url: `${ISSUER}/tg/grant-status?grant_id=grt_missing`,
+      headers: {},
+    });
+    assert.equal(errorCode(res), Codes.GRANT_UNKNOWN);
   });
 });

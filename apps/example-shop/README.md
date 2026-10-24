@@ -110,6 +110,5 @@ Covers: money handling, auth/sessions, cart, wallet accounting invariants (entri
 
 - This is a reference app for an experimental protocol, not a production template. Private key material (the site signing JWK) is stored in the app database for demo continuity — a real deployment sources `signingKeys` from a KMS.
 - CSRF tokens are per-session; SameSite=Lax is a second layer, not the primary defense.
-- `grant_revocation` (agent-initiated) is intentionally left unconfigured and denies all calls — draft 0.1 does not specify its caller model. Revocation happens through the site's own UI.
-- Known SDK issue (D2): `fetchTransport` on recent Node versions fails GET requests that carry an empty body; `src/dev/loopback.ts` works around it by dropping zero-length bodies.
+- `grant_revocation` accepts agent self-revocation (a section 11 signed request carrying the grant being revoked, spec section 13) and the site's own UI calls `revokeGrant` directly. No `revocationAuthorizer` is configured, so unsigned external callers are denied.
 - Session cookie `Secure` is set only in TLS mode; HTTP dev mode omits it deliberately.

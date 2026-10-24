@@ -122,7 +122,7 @@ export interface ProtectedRequestOptions {
  * The structured result of a protected request. `error` carries the parsed
  * error envelope when the site answered a TrailGate error (branch on
  * `code`, never `message`). `receipt` reports verification of the
- * `trailgate-receipt` header when present (provisional transport; see
+ * `trailgate-receipt` header when present (spec section 14.1; see
  * `receipts.ts`). HTTP-level denials are data, not exceptions.
  */
 export interface ProtectedResponse {

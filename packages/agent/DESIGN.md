@@ -2,7 +2,7 @@
 
 Owner: D2. Status: Phase 2 foundation against `spec/protocol.md` draft 0.1. Experimental; not production ready.
 
-This document records the API outline, the provisional surfaces, and the contract questions that need D0.
+This document records the API outline and design choices. The provisional surfaces and contract questions were settled by ADR 0009 (draft 0.1 errata); resolutions are recorded under "Questions for D0" below.
 
 ## Model boundary
 
@@ -38,22 +38,24 @@ The SDK separates what a model runtime may see from what the protocol needs:
 | Retry classification | `isRetryableCode` | `tg.internal.unavailable`/`tg.internal.error` only (spec/errors.md) |
 | Error reporting | `parseErrorEnvelope`, `errorFromResponse`, `ProtectedResponse.error` | Section 16 + `spec/errors.md` |
 
-## Provisional surfaces
+## Ratified surfaces
 
-Marked `@provisional` in code. Depend on contract questions below or on decisions outside the spec text.
+Previously `@provisional`; settled by ADR 0009.
 
-1. `RECEIPT_HEADER = 'trailgate-receipt'` (receipts.ts). Draft 0.1 requires a receipt per protected request but does not name the delivery channel. Mirrors `RECEIPT_HEADER` in `@trailgate/server`. A D0 ruling changes both together.
-2. `client.revokeGrant` sends `{grant_id, reason?}` to `endpoints.grant_revocation`. Draft 0.1 names the endpoint but defines no agent-initiated body or caller model; the server SDK's provisional handler expects this shape behind a `revocationAuthorizer`.
-3. Status responses are treated as unsigned informational documents (spec section 10.5 lets sites choose; the server SDK sends them plainly). If the spec later profiles signed status, `fetchGrantStatus` gains a verification path.
+1. `RECEIPT_HEADER = 'trailgate-receipt'` is the normative receipt channel (spec section 14.1). Mirrors `RECEIPT_HEADER` in `@trailgate/server`.
+2. `client.revokeGrant` sends `{grant_id, reason?}` to `endpoints.grant_revocation` per `spec/schemas/grant-revocation.schema.json`. To self-revoke the agent presents the call as a section 11 signed request carrying the grant being revoked; the server verifies it like any protected request.
+3. Status responses are unsigned informational documents (spec section 10.5); `fetchGrantStatus` treats them as advisory, matching the ratified contract.
 4. `AgentSigner.sign(signatureBase)` duplicates the last step of core `signRequest` so non-exportable key providers work. Header bytes are tested identical to core's output for Ed25519.
 
 ## Questions for D0
 
-- Q1. Receipt transport: confirm `trailgate-receipt` header (or spec a channel) in a spec errata; affects this package and `@trailgate/server` equally.
-- Q2. Agent-initiated revocation: request schema and caller model for `grant_revocation`. The SDK currently mirrors D1's provisional `{grant_id, reason?}`.
-- Q3. Signed `grant_status`: is a signed status profile wanted, or is plainly informational the 0.1 answer? Agents currently treat status as untrusted.
-- Q4. `signRequest` signer indirection: should core grow a `signRequestWithSigner(req, {signer, ...})` so both SDKs share the profile assembly? Not blocking; the duplication is small and pinned by an equivalence test.
-- Q5. Local development without TLS: spec requires HTTPS everywhere; a local dev mode (`http://localhost`) would need an explicit spec decision, not an SDK-side carve-out. Flagging early because D3's demo work will hit it.
+Resolved in ADR 0009 (`docs/decisions/0009-contract-ratifications.md`), draft 0.1 errata:
+
+- Q1. Resolved: `trailgate-receipt` response header is the normative channel (spec section 14.1).
+- Q2. Resolved: body `{grant_id, reason?}` per `spec/schemas/grant-revocation.schema.json`; a bound grant revokes itself by presenting the call as a section 11 signed request.
+- Q3. Resolved: `grant_status` is plainly informational unsigned JSON (spec section 10.5); agents treat it as advisory, which matches current behavior.
+- Q4. Not ratified: duplication between this package and core stays; it is small and pinned by an equivalence test.
+- Q5. Rejected: HTTPS stays mandatory. The sanctioned dev pattern is an https issuer identity mapped onto a loopback transport (ExampleShop `loopback.ts`), not a plaintext carve-out.
 
 ## Security notes
 

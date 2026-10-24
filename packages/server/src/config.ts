@@ -41,6 +41,8 @@ import type { EffectiveScope, RequestedScope } from './types.ts';
 export const DEFAULT_GRANT_REQUEST_TTL_SECONDS = 900;
 export const DEFAULT_GRANT_LIFETIME_SECONDS = 3600;
 export const DEFAULT_RESERVATION_TTL_SECONDS = 300;
+export const DEFAULT_MAX_BODY_BYTES = 65_536;
+export const DEFAULT_MAX_HEADERS_BYTES = 16_384;
 
 /** Storage and accounting adapters backing the SDK. All default to in-memory. */
 export interface ServerStores {
@@ -126,6 +128,13 @@ export interface TrailGateServerOptions {
   maxGrantSeconds?: number;
   /** Reservation TTL; recommended 300 (spec section 12). */
   reservationTtlSeconds?: number;
+  /**
+   * Maximum protected-request body bytes accepted before denial with
+   * `tg.request.too_large` (spec section 17). Default 64 KiB.
+   */
+  maxBodyBytes?: number;
+  /** Maximum total header name+value bytes. Default 16 KiB. */
+  maxHeadersBytes?: number;
 }
 
 export interface ResolvedServerConfig {
@@ -158,6 +167,8 @@ export interface ResolvedServerConfig {
   defaultGrantSeconds: number;
   maxGrantSeconds?: number;
   reservationTtlSeconds: number;
+  maxBodyBytes: number;
+  maxHeadersBytes: number;
   supportedProtocolVersions: readonly string[];
 }
 
@@ -257,6 +268,8 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     grantRequestTtlSeconds: grantRequestTtl,
     defaultGrantSeconds: options.defaultGrantSeconds ?? DEFAULT_GRANT_LIFETIME_SECONDS,
     reservationTtlSeconds: options.reservationTtlSeconds ?? DEFAULT_RESERVATION_TTL_SECONDS,
+    maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
+    maxHeadersBytes: options.maxHeadersBytes ?? DEFAULT_MAX_HEADERS_BYTES,
     supportedProtocolVersions: protocolVersions,
     ...(options.policy !== undefined ? { policy: options.policy } : {}),
     ...(options.resourceOwners !== undefined ? { resourceOwners: options.resourceOwners } : {}),

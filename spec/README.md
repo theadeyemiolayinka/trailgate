@@ -7,7 +7,7 @@ This directory holds the language-neutral protocol specification. Current versio
 - `protocol.md`: the normative protocol document (actors, discovery, consent, grants, proofs, constraints, spending, revocation, receipts, audit, errors).
 - `errors.md`: the error code registry (append-only).
 - `schemas/`: JSON Schema draft 2020-12 documents, `$id`s `urn:trailgate:schemas:*`:
-  `discovery`, `grant-request`, `grant`, `constraint`, `receipt`, `error`, `audit-event`.
+  `discovery`, `grant-request`, `grant`, `constraint`, `receipt`, `error`, `audit-event`, `grant-revocation`.
 - `examples/`: worked examples (documents and an annotated protected request).
 - `vectors/`: conformance vectors (`vectors.json`): schema cases validate against the schemas; decision cases record expected enforcement outcomes for the conformance suite.
 

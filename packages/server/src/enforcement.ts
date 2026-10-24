@@ -138,6 +138,59 @@ async function denialResponse(
   return { status: error.httpStatus, headers, body: toErrorResponse(error) };
 }
 
+/**
+ * Cheap request-size bounds checked before any cryptographic or storage
+ * work (spec section 17). Oversized requests deny with
+ * `tg.request.too_large`.
+ */
+export function assertRequestLimits(
+  req: HostRequest,
+  config: { maxBodyBytes: number; maxHeadersBytes: number },
+): void {
+  const bodyBytes = typeof req.body === 'string' ? req.body.length : (req.body?.byteLength ?? 0);
+  if (bodyBytes > config.maxBodyBytes) {
+    throw new TrailGateError(Codes.REQUEST_TOO_LARGE, 'request body exceeds the site limit', {
+      limit: config.maxBodyBytes,
+    });
+  }
+  let headerBytes = 0;
+  for (const [name, value] of Object.entries(req.headers)) {
+    headerBytes += name.length + value.length;
+    if (headerBytes > config.maxHeadersBytes) {
+      throw new TrailGateError(Codes.REQUEST_TOO_LARGE, 'request headers exceed the site limit', {
+        limit: config.maxHeadersBytes,
+      });
+    }
+  }
+}
+
+/**
+ * Runs the spec section 11 verification pipeline for endpoints that accept
+ * a signed agent request outside `protect` (grant self-revocation, spec
+ * section 13). Returns the verified result or throws.
+ */
+export async function verifyAgentRequest(
+  req: HostRequest,
+  config: ResolvedServerConfig,
+): Promise<RequestVerificationResult> {
+  return verifyProtectedRequest(req, {
+    issuer: config.issuer,
+    audience: config.audience,
+    resolveSiteKey: siteKeyResolver(config),
+    resolveAgentKey: config.stores.agentKeys,
+    revocation: config.stores.grants,
+    nonceStore: config.stores.nonces,
+    idempotency: config.stores.idempotency,
+    ledger: config.stores.ledger,
+    rateLimiter: config.stores.rateLimiter,
+    clock: config.clock,
+    toleranceSeconds: config.toleranceSeconds,
+    supportedProtocolVersions: config.supportedProtocolVersions,
+    permissionVocabulary: config.permissions,
+    ...(config.resourceOwners !== undefined ? { resourceOwners: config.resourceOwners } : {}),
+  });
+}
+
 function resolveAmount(route: RouteProtection, req: HostRequest): Money | undefined {
   return typeof route.amount === 'function' ? route.amount(req) : route.amount;
 }
@@ -179,6 +232,11 @@ export function createProtectedHandler(
   config: ResolvedServerConfig,
 ): (req: HostRequest) => Promise<HostResponse> {
   return async (req) => {
+    try {
+      assertRequestLimits(req, config);
+    } catch (err) {
+      return denialResponse(err, req, config);
+    }
     const amount = resolveAmount(route, req);
     const resource = resolveResource(route, req);
     let result: RequestVerificationResult;
@@ -237,8 +295,8 @@ export function createProtectedHandler(
       if (stored?.outcome === undefined) {
         return denialResponse(
           new TrailGateError(
-            Codes.INTERNAL_UNAVAILABLE,
-            'idempotent replay has no recorded outcome',
+            Codes.REQUEST_IDEMPOTENCY_IN_FLIGHT,
+            'a request with this idempotency key is still executing',
           ),
           req,
           config,
@@ -256,18 +314,77 @@ export function createProtectedHandler(
       return replayed;
     }
 
+    const mutating = route.mutating !== false;
+    if (mutating && idempotencyKey !== undefined) {
+      // Claim-at-lookup (spec section 11.4): the pending record stops a
+      // concurrent duplicate from executing twice. A record that appeared
+      // between verification and claim is replayed or reported in flight.
+      const claim = await config.stores.idempotency.claim(
+        grant.jti,
+        idempotencyKey,
+        operationDigestOf(req, grant.jti),
+      );
+      if (claim.kind === 'conflict') {
+        return denialResponse(
+          new TrailGateError(
+            Codes.REQUEST_IDEMPOTENCY_CONFLICT,
+            'idempotency-key reused with a different request',
+          ),
+          req,
+          config,
+          { grantId: grant.jti, signatureBase: result.signatureBase },
+        );
+      }
+      if (claim.kind === 'existing') {
+        if (claim.record.outcome === undefined) {
+          return denialResponse(
+            new TrailGateError(
+              Codes.REQUEST_IDEMPOTENCY_IN_FLIGHT,
+              'a request with this idempotency key is still executing',
+            ),
+            req,
+            config,
+            { grantId: grant.jti, signatureBase: result.signatureBase },
+          );
+        }
+        const outcome = claim.record.outcome;
+        const replayed: HostResponse = { status: outcome.status };
+        if (outcome.headers !== undefined) {
+          replayed.headers = outcome.headers;
+        }
+        if (outcome.body !== undefined) {
+          replayed.body = outcome.body;
+        }
+        return replayed;
+      }
+    }
+
     let reservation: Reservation | undefined;
     if (amount !== undefined) {
       const budgets = grant.tg.constraints
         .filter((c) => c.type === 'cumulative_budget')
         .map((c) => c.params as Money | undefined)
         .filter((p): p is Money => p !== undefined && p.currency === amount.currency);
+      const spendWindows = grant.tg.constraints
+        .filter((c) => c.type === 'spend_window')
+        .map((c) => c.params as (Money & { window_seconds?: number }) | undefined)
+        .filter(
+          (p): p is Money & { window_seconds: number } =>
+            p !== undefined &&
+            p.currency === amount.currency &&
+            typeof p.window_seconds === 'number',
+        )
+        .map((p) => ({
+          limit: { amount: p.amount, currency: p.currency },
+          windowSeconds: p.window_seconds,
+        }));
       try {
         reservation = await config.stores.ledger.reserve({
           reservationId: randomId('rsv'),
           grantId: grant.jti,
           amount,
           budgets,
+          spendWindows,
           now,
           ttlSeconds: config.reservationTtlSeconds,
         });
@@ -352,15 +469,31 @@ export function createProtectedHandler(
     };
     const finalResponse: HostResponse = { ...response, headers };
 
-    if (route.mutating !== false && idempotencyKey !== undefined) {
+    if (mutating && idempotencyKey !== undefined) {
       try {
         await config.stores.idempotency.record(grant.jti, idempotencyKey, {
           requestDigest: operationDigestOf(req, grant.jti),
           outcome: { status: finalResponse.status, headers, body: finalResponse.body },
         });
-      } catch {
-        // A record that cannot be stored weakens dedupe, not this response;
-        // production stores should surface this operationally.
+      } catch (recordErr) {
+        // The response is still returned: a failed outcome write weakens
+        // dedupe rather than this request. It MUST be visible operationally
+        // though: the orphaned pending claim would answer in_flight to every
+        // retry until the site's claim TTL reclaims it. Audit is best-effort
+        // for the same reason.
+        try {
+          await config.stores.audit.record({
+            event: 'idempotency.record_failed',
+            at: config.clock.now(),
+            grant_id: grant.jti,
+            detail: {
+              key: idempotencyKey,
+              error: recordErr instanceof Error ? recordErr.message : String(recordErr),
+            },
+          });
+        } catch {
+          // Audit sink failing too cannot change the response.
+        }
       }
     }
     return finalResponse;

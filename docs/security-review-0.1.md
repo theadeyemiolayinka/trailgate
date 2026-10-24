@@ -279,3 +279,59 @@ defects were confirmed and fixed; none were critical. The protocol's consent,
 spending-atomicity, discovery-transport, key-lifecycle, and audit requirements remain
 unimplemented anywhere in this repository. Nothing in this codebase supports claims of
 formal verification, certification, or production readiness.
+
+## Addendum: post-integration follow-up
+
+Reviewed again after D1 (server SDK), D2 (agent SDK), and D3 (ExampleShop) landed,
+including the ADR 0009 contract ratifications. Scope extended to `packages/server`,
+`packages/agent`, `packages/conformance`, and `apps/example-shop`.
+
+Resolved since the original review:
+
+- Atomic spending is implemented (`SpendingLedger` port: reserve/consume/release/
+  refund with the headroom check inside the atomic reserve), and exercised by the
+  conformance suite against both the in-memory reference and ExampleShop's SQLite
+  stores. D-1 is no longer unimplemented anywhere.
+- Consent flow: server SDK lifecycle endpoints plus agent-side redirect/state/S256
+  validation. D-2 and D-3 have real implementations now.
+- Idempotency claim-at-lookup (spec 11.4): the in-flight duplicate window from the
+  lookup-then-record design is closed at the contract level; pending records answer
+  `tg.request.idempotency_in_flight` (409). SQLite implementation claims via
+  `INSERT ... ON CONFLICT DO NOTHING`.
+- New normative surfaces (ADR 0009): `trailgate-receipt` header is the receipt
+  channel; `grant_status` is unsigned informational JSON; `grant_revocation` has a
+  schema (`{grant_id, reason?}`) and caller model (signed self-revocation or
+  site-authorized); `spend_window` constraint for rolling-window spend caps;
+  new codes `tg.grant.unknown`, `tg.request.idempotency_in_flight`,
+  `tg.request.too_large`; `trailgate-agent` header reference removed.
+- Confirmed defect fixed: `fetchTransport` sent a zero-length body on GET/HEAD,
+  which undici rejects; every GET protected request through the stock SDK failed.
+  `transport.ts` now omits empty bodies (commit `7750be5`).
+- Confirmed defect fixed: `operationDigestOf` was private in core while the server
+  SDK replicated it; it is now exported and shared.
+- Agent self-revocation goes through a section 11 signed request end to end
+  (agent `client.revokeGrant` signs; server verifies via `verifyAgentRequest` and
+  binds `grant_id` to the presented grant).
+- Request-size bounds enforced before verification (`tg.request.too_large`).
+- Port-contract conformance suite added (`@trailgate/conformance`): CAS
+  transitions, atomic nonce/idempotency claims, atomic ledger reserve including
+  `spend_window`, rate windows, audit ordering. Runs against in-memory and
+  ExampleShop SQLite stores.
+
+Still open at this revision:
+
+- Site signing key custody is dev-grade (JWK in ExampleShop SQLite `app_settings`);
+  production requires a KMS or secret store. Documented, not implemented.
+- Agent key custody: software and file providers only; OS-keystore backends are
+  interface-ready but unimplemented.
+- `node:http` remains the only adapter exercised by tests; other frameworks are
+  unverified.
+- Denial receipts still require a parseable grant/signature-base binding; early
+  malformed requests get the error envelope only. This is inherent to receipt
+  binding, not a defect.
+- A failed idempotency outcome write leaves a pending record answering in-flight
+  until the site's claim TTL reclaims it; it is now audited
+  (`idempotency.record_failed`) but still degrades dedupe for that key.
+- Discovery document signing, grant refresh, attenuation: open spec issues.
+- `rate_limit` window semantics (fixed vs sliding) remain a spec question;
+  implementations use rolling windows.

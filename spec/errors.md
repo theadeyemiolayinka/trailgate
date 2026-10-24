@@ -20,6 +20,7 @@ Every error response uses the envelope in `spec/schemas/error.schema.json`:
 | `tg.grant.expired` | 403 | Grant `exp` or `valid_window` has passed | Deny; agent should discard the grant |
 | `tg.grant.revoked` | 403 | Grant is revoked | Deny; agent should discard the grant |
 | `tg.grant.redeemed` | 409 | Redemption already consumed for this `request_id` | Do not retry; poll status instead |
+| `tg.grant.unknown` | 404 | Unknown `request_id` or `grant_id` (status, revocation, revocation queries) | Check the identifier; do not retry |
 | `tg.grant.unknown_permission` | 400 | Requested permission not in site vocabulary | Fix request; do not retry unchanged |
 | `tg.grant.scope_rejected` | 403 | Site refuses the requested permission, resource, or constraint set | Narrow the request or stop |
 | `tg.grant.consent_denied` | 403 | User denied consent | Do not retry the same request |
@@ -30,6 +31,8 @@ Every error response uses the envelope in `spec/schemas/error.schema.json`:
 | `tg.request.expired` | 403 | Signature outside `created`/`expires` window or tolerance | Re-sign with current time; check clock skew |
 | `tg.request.replay_detected` | 403 | `nonce` already seen for this grant | Do not retry identical request |
 | `tg.request.idempotency_conflict` | 409 | `Idempotency-Key` reused with a different body | Fetch the stored outcome instead |
+| `tg.request.idempotency_in_flight` | 409 | Same key and operation still executing; outcome not yet recorded | Retry the lookup after a delay |
+| `tg.request.too_large` | 413 | Request exceeds the site's size limits | Reduce request size; do not retry unchanged |
 | `tg.request.audience_mismatch` | 403 | Grant `aud` does not match this site | Grant belongs elsewhere; do not retry |
 | `tg.request.permission_denied` | 403 | Action not covered by grant permissions | Stop; the grant does not allow this |
 | `tg.request.resource_denied` | 403 | Resource not in grant scope or not owned by the grant's context | Stop; cross-context access is never retried |

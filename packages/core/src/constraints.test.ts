@@ -66,6 +66,40 @@ describe('evaluateConstraints', () => {
     await expectCode(Codes.INTERNAL_UNAVAILABLE, () => evaluateConstraints([c], BASE));
   });
 
+  it('enforces spend_window against windowed ledger totals', async () => {
+    const c: Constraint = {
+      type: 'spend_window',
+      params: { amount: 10000, currency: 'USD', window_seconds: 86_400 },
+    };
+    const windowedLedger: Ledger = {
+      ...ledger(0, 500),
+      consumedInWindow: async () => 9000,
+    };
+    await evaluateConstraints([c], {
+      ...BASE,
+      ledger: windowedLedger,
+      requestAmount: { amount: 500, currency: 'USD' },
+    });
+    await expectCode(Codes.CONSTRAINT_VIOLATED, () =>
+      evaluateConstraints([c], {
+        ...BASE,
+        ledger: windowedLedger,
+        requestAmount: { amount: 501, currency: 'USD' },
+      }),
+    );
+  });
+
+  it('fails closed for spend_window without a windowed ledger', async () => {
+    const c: Constraint = {
+      type: 'spend_window',
+      params: { amount: 10000, currency: 'USD', window_seconds: 86_400 },
+    };
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () => evaluateConstraints([c], BASE));
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () =>
+      evaluateConstraints([c], { ...BASE, ledger: ledger(0, 0) }),
+    );
+  });
+
   it('enforces rate_limit', async () => {
     const c: Constraint = {
       type: 'rate_limit',

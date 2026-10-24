@@ -8,6 +8,7 @@ export const REGISTERED_CONSTRAINT_TYPES = [
   'cumulative_budget',
   'rate_limit',
   'valid_window',
+  'spend_window',
 ] as const;
 
 export interface ConstraintContext {
@@ -118,6 +119,56 @@ async function evaluateRateLimit(
   }
 }
 
+async function evaluateSpendWindow(
+  params: Record<string, unknown>,
+  ctx: ConstraintContext,
+): Promise<void> {
+  const budget = checkMoneyShape(params);
+  const windowSeconds = asInteger(params['window_seconds'], 'window_seconds');
+  if (windowSeconds < 1) {
+    throw new TrailGateError(Codes.CONSTRAINT_VIOLATED, 'spend_window window must be positive', {
+      type: 'spend_window',
+    });
+  }
+  if (ctx.ledger?.consumedInWindow === undefined) {
+    throw new TrailGateError(
+      Codes.INTERNAL_UNAVAILABLE,
+      'spend_window cannot be evaluated without a windowed ledger',
+    );
+  }
+  const ledger = ctx.ledger;
+  const consumedInWindow = ledger.consumedInWindow;
+  const [consumed, reserved] = await Promise.all([
+    callPort(
+      () =>
+        (consumedInWindow as NonNullable<Ledger['consumedInWindow']>)(
+          ctx.grantId,
+          budget.currency,
+          windowSeconds,
+          ctx.now,
+        ),
+      'ledger is unavailable',
+    ),
+    callPort(
+      () => ledger.reservedMinorUnits(ctx.grantId, budget.currency),
+      'ledger is unavailable',
+    ),
+  ]);
+  const requested =
+    ctx.requestAmount !== undefined && ctx.requestAmount.currency === budget.currency
+      ? ctx.requestAmount.amount
+      : 0;
+  if ((consumed ?? 0) + reserved + requested > budget.amount) {
+    throw new TrailGateError(Codes.CONSTRAINT_VIOLATED, 'spend_window would be exceeded', {
+      type: 'spend_window',
+      limit: budget,
+      window_seconds: windowSeconds,
+      consumed,
+      reserved,
+    });
+  }
+}
+
 function evaluateValidWindow(params: Record<string, unknown>, ctx: ConstraintContext): void {
   const notBefore = asInteger(params['not_before'], 'not_before');
   const notAfter = asInteger(params['not_after'], 'not_after');
@@ -150,6 +201,9 @@ export async function evaluateConstraints(
         break;
       case 'rate_limit':
         await evaluateRateLimit(params, ctx);
+        break;
+      case 'spend_window':
+        await evaluateSpendWindow(params, ctx);
         break;
       case 'valid_window':
         evaluateValidWindow(params, ctx);

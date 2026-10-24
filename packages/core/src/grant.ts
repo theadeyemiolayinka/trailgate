@@ -1,8 +1,10 @@
+import { createPrivateKey, type JsonWebKey } from 'node:crypto';
+import { SignJWT } from 'jose';
 import { Codes, TrailGateError } from './errors.ts';
-import { checkJwsHeader, decodeCompactJws, verifyJwsSignature } from './jwt.ts';
+import { checkJwsHeader, decodeCompactJws, type JwtAlgorithm, verifyJwsSignature } from './jwt.ts';
 import { callPort, type KeyResolver } from './ports.ts';
 import { SCHEMA_IDS, schemaRegistry } from './schemas.ts';
-import type { GrantPayload } from './types.ts';
+import type { GrantPayload, Jwk } from './types.ts';
 
 export const GRANT_TYP = 'trailgate-grant+jwt';
 
@@ -36,6 +38,21 @@ export function parseGrant(
   const payload = decoded.payload as GrantPayload;
   assertNoUnknownCriticalFields(payload.critical, knownCriticalFields);
   return { header: decoded.header, payload };
+}
+
+export interface SignGrantOptions {
+  privateJwk: Jwk;
+  kid: string;
+  alg?: JwtAlgorithm;
+}
+
+/** Signs a grant payload as a compact JWS with the section 6.1 header profile. */
+export async function signGrant(payload: GrantPayload, options: SignGrantOptions): Promise<string> {
+  const alg = options.alg ?? 'EdDSA';
+  const key = createPrivateKey({ key: options.privateJwk as JsonWebKey, format: 'jwk' });
+  return new SignJWT(payload as unknown as Record<string, unknown>)
+    .setProtectedHeader({ alg, typ: GRANT_TYP, kid: options.kid })
+    .sign(key);
 }
 
 export interface GrantVerificationDeps {
