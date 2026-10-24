@@ -116,6 +116,11 @@ export interface GrantRegistry extends RevocationChecker, GrantScopeChecker {
   insert(record: IssuedGrantRecord): Promise<void>;
   get(jti: string): Promise<IssuedGrantRecord | undefined>;
   /**
+   * Lists grants issued under a user context (grant `sub`), for
+   * grant-management surfaces. Returns empty array when absent.
+   */
+  listBySubject(subject: string): Promise<IssuedGrantRecord[]>;
+  /**
    * Atomically marks a grant revoked. Returns the updated record, or undefined
    * when the grant is absent or already revoked. Revocation is checked at
    * every enforcement pass against current state (spec section 13).

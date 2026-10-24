@@ -77,6 +77,8 @@ export function createInMemoryGrantRegistry(): GrantRegistry {
       grants.set(record.jti, record);
     },
     get: async (jti) => grants.get(jti),
+    listBySubject: async (subject) =>
+      [...grants.values()].filter((record) => record.subject === subject),
     isRevoked: async (jti) => grants.get(jti)?.status === 'revoked',
     revoke: async (jti, input) => {
       const record = grants.get(jti);

@@ -1,0 +1,24 @@
+{
+  "name": "blogarithm",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.ts",
+    "start": "node src/server.ts",
+    "demo": "node src/dev/demo-agent.ts",
+    "seed": "node src/db/seed.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@trailgate/core": "workspace:*",
+    "@trailgate/server": "workspace:*"
+  },
+  "devDependencies": {
+    "@trailgate/agent": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}
