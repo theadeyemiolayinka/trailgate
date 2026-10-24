@@ -69,7 +69,7 @@ export async function verifyGrant(
 ): Promise<GrantPayload> {
   const { header, payload } = parseGrant(token, deps.knownCriticalFields);
   const alg = checkJwsHeader(header, GRANT_TYP);
-  const kid = header['kid'];
+  const kid = header.kid;
   if (typeof kid !== 'string' || kid.length === 0) {
     throw new TrailGateError(Codes.GRANT_MALFORMED, 'grant header missing kid');
   }

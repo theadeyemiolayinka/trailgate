@@ -50,7 +50,7 @@ export class CsrfError extends Error {
  */
 export function requireCsrf(req: AppRequest, form: Record<string, string>): void {
   const token = req.session?.csrfToken;
-  const supplied = form['_csrf'];
+  const supplied = form._csrf;
   if (token === undefined || supplied === undefined || supplied !== token) {
     throw new CsrfError();
   }

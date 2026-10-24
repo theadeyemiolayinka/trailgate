@@ -74,7 +74,7 @@ function createHost() {
   });
 
   const sessionUser = (req: HostRequest): string | undefined =>
-    sessions.get(req.headers['cookie']?.replace('session=', '') ?? '');
+    sessions.get(req.headers.cookie?.replace('session=', '') ?? '');
 
   const bodyJson = (req: HostRequest): unknown => {
     const text =

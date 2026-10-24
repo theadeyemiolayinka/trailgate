@@ -33,7 +33,7 @@ describe('toErrorResponse', () => {
         type: 'cumulative_budget',
       }),
     );
-    assert.equal(body.error.detail?.['type'], 'cumulative_budget');
+    assert.equal(body.error.detail?.type, 'cumulative_budget');
   });
 
   it('maps unknown errors to a generic internal error without leaking internals', () => {

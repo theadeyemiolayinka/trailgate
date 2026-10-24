@@ -308,7 +308,7 @@ export async function signRequest(
     });
   }
   headers['signature-input'] = `tg=${serializeSignatureParams(entry)}`;
-  headers['signature'] = `tg=:${signature.toString('base64')}:`;
+  headers.signature = `tg=:${signature.toString('base64')}:`;
   return headers;
 }
 

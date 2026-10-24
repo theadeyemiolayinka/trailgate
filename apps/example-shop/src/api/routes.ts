@@ -282,8 +282,8 @@ export function createAgentApi(
         async (req, ctx) => {
           const subject = requireSubject(ctx);
           const body = bodyObject(req);
-          const sku = body['sku'];
-          const qty = body['qty'];
+          const sku = body.sku;
+          const qty = body.qty;
           if (typeof sku !== 'string' || typeof qty !== 'number') {
             return err(
               400,
@@ -399,7 +399,7 @@ export function createAgentApi(
         {
           permission: 'tg.order.read',
           resource: (req) => {
-            const id = matchPath('/api/orders/:id', new URL(req.url).pathname)?.['id'];
+            const id = matchPath('/api/orders/:id', new URL(req.url).pathname)?.id;
             return id === undefined ? undefined : orderSelector(id);
           },
           mutating: false,
@@ -428,7 +428,7 @@ export function createAgentApi(
         {
           permission: 'tg.order.read',
           resource: (req) => {
-            const id = matchPath('/api/orders/:id/invoice', new URL(req.url).pathname)?.['id'];
+            const id = matchPath('/api/orders/:id/invoice', new URL(req.url).pathname)?.id;
             return id === undefined ? undefined : orderSelector(id);
           },
           mutating: false,
@@ -463,7 +463,7 @@ export function createAgentApi(
           resource: (_req, ctx) =>
             ctx.subject === undefined ? undefined : walletSelector(ctx.subject),
           amount: (req) => {
-            const id = matchPath('/api/orders/:id/pay', new URL(req.url).pathname)?.['id'];
+            const id = matchPath('/api/orders/:id/pay', new URL(req.url).pathname)?.id;
             if (id === undefined) {
               return undefined;
             }

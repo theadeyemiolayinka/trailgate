@@ -36,7 +36,7 @@ describe('inspectSite', () => {
     const result = await inspectSite(client, ORIGIN);
     assert.equal(result.status, 'supported');
     if (result.status === 'supported') {
-      assert.deepEqual(describeSite(result.site)['protocolVersion'], '0.1');
+      assert.deepEqual(describeSite(result.site).protocolVersion, '0.1');
     }
   });
 });

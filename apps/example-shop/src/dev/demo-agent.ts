@@ -14,8 +14,8 @@ import { createAgentClient, SoftwareKeyProvider } from '@trailgate/agent';
 import { verifyReceipt } from '@trailgate/core';
 import { loopbackTransport } from './loopback.ts';
 
-const ISSUER = process.env['SHOP_ISSUER'] ?? 'https://localhost:3443';
-const HTTP_BASE = `http://127.0.0.1:${process.env['SHOP_PORT'] ?? '3300'}`;
+const ISSUER = process.env.SHOP_ISSUER ?? 'https://localhost:3443';
+const HTTP_BASE = `http://127.0.0.1:${process.env.SHOP_PORT ?? '3300'}`;
 const args = process.argv.slice(2);
 const flag = (name: string, fallback: number): number => {
   const i = args.indexOf(name);

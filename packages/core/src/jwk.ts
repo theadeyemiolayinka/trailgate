@@ -19,7 +19,7 @@ export function jwkThumbprint(jwk: Jwk): string {
       members[name] = jwk[name];
     }
   }
-  if (members['kty'] === undefined) {
+  if (members.kty === undefined) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'jwk is missing kty');
   }
   const canonical = JSON.stringify(members);
@@ -35,20 +35,20 @@ export function jwkToPublicKey(jwk: Jwk): KeyObject {
 }
 
 export function isAgentKeyShape(jwk: Jwk): boolean {
-  if (jwk['kty'] === 'OKP') {
-    return jwk['crv'] === 'Ed25519' && typeof jwk['x'] === 'string';
+  if (jwk.kty === 'OKP') {
+    return jwk.crv === 'Ed25519' && typeof jwk.x === 'string';
   }
-  if (jwk['kty'] === 'EC') {
-    return jwk['crv'] === 'P-256' && typeof jwk['x'] === 'string' && typeof jwk['y'] === 'string';
+  if (jwk.kty === 'EC') {
+    return jwk.crv === 'P-256' && typeof jwk.x === 'string' && typeof jwk.y === 'string';
   }
   return false;
 }
 
 export function signatureAlgorithmFor(jwk: Jwk): 'ed25519' | 'ecdsa-p256-sha256' | undefined {
-  if (jwk['kty'] === 'OKP' && jwk['crv'] === 'Ed25519') {
+  if (jwk.kty === 'OKP' && jwk.crv === 'Ed25519') {
     return 'ed25519';
   }
-  if (jwk['kty'] === 'EC' && jwk['crv'] === 'P-256') {
+  if (jwk.kty === 'EC' && jwk.crv === 'P-256') {
     return 'ecdsa-p256-sha256';
   }
   return undefined;

@@ -145,7 +145,7 @@ describe('in-memory ledger', () => {
       (err: unknown) =>
         err instanceof TrailGateError &&
         err.code === Codes.CONSTRAINT_VIOLATED &&
-        err.detail?.['type'] === 'spend_window',
+        err.detail?.type === 'spend_window',
     );
     await ledger.consume('rsv_1', 1000);
     assert.equal(await ledger.consumedInWindow?.('grt_1', 'USD', 3600, 1000), 4000);

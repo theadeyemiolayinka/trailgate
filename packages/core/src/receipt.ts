@@ -98,7 +98,7 @@ export async function verifyReceipt(
 ): Promise<ReceiptPayload> {
   const decoded = decodeCompactJws(token);
   const alg = checkJwsHeader(decoded.header, RECEIPT_TYP);
-  const kid = decoded.header['kid'];
+  const kid = decoded.header.kid;
   if (typeof kid !== 'string' || kid.length === 0) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'receipt header missing kid');
   }

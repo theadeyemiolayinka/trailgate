@@ -139,7 +139,7 @@ function hostToAppRequest(
   req: { method: string; url: string; headers: Record<string, string>; body?: Uint8Array },
 ): AppRequest {
   const url = new URL(req.url, ctx.config.issuer);
-  const cookies = parseCookies(req.headers['cookie']);
+  const cookies = parseCookies(req.headers.cookie);
   const sessionId = cookies[SESSION_COOKIE];
   const session = sessionId !== undefined ? getSession(ctx.db, sessionId) : undefined;
   const user = session !== undefined ? getUser(ctx.db, session.userId) : undefined;
@@ -264,7 +264,7 @@ async function protocolOrApi(
 function nextPath(req: AppRequest, form: Record<string, string>): string {
   const local = (v: string | null | undefined): string | undefined =>
     typeof v === 'string' && v.startsWith('/') && !v.startsWith('//') ? v : undefined;
-  return local(form['next']) ?? local(req.url.searchParams.get('next')) ?? '/';
+  return local(form.next) ?? local(req.url.searchParams.get('next')) ?? '/';
 }
 
 function siteIdentity(ctx: Ctx) {
@@ -327,7 +327,7 @@ function buildRoutes(ctx: Ctx): Router {
   });
 
   router.get('/products/:sku', (req) => {
-    const product = getProduct(db, req.params['sku'] as string);
+    const product = getProduct(db, req.params.sku as string);
     if (product === undefined) {
       return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
     }
@@ -389,19 +389,19 @@ function buildRoutes(ctx: Ctx): Router {
   router.post(
     '/cart/add',
     cartPost((form, userId) => {
-      setCartQty(db, userId, form['sku'] ?? '', Number.parseInt(form['qty'] ?? '1', 10));
+      setCartQty(db, userId, form.sku ?? '', Number.parseInt(form.qty ?? '1', 10));
     }),
   );
   router.post(
     '/cart/update',
     cartPost((form, userId) => {
-      setCartQty(db, userId, form['sku'] ?? '', Number.parseInt(form['qty'] ?? '0', 10));
+      setCartQty(db, userId, form.sku ?? '', Number.parseInt(form.qty ?? '0', 10));
     }),
   );
   router.post(
     '/cart/remove',
     cartPost((form, userId) => {
-      setCartQty(db, userId, form['sku'] ?? '', 0);
+      setCartQty(db, userId, form.sku ?? '', 0);
     }),
   );
 
@@ -428,7 +428,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed(async (req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const addressId = form['address_id'] === '' ? undefined : form['address_id'];
+      const addressId = form.address_id === '' ? undefined : form.address_id;
       try {
         const order = createOrderFromCart(db, user.id, {
           ...(addressId !== undefined ? { addressId } : {}),
@@ -475,7 +475,7 @@ function buildRoutes(ctx: Ctx): Router {
   router.get(
     '/orders/:id',
     authed((req, user) => {
-      const order = getOrder(db, req.params['id'] as string, user.id);
+      const order = getOrder(db, req.params.id as string, user.id);
       if (order === undefined) {
         return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
       }
@@ -498,7 +498,7 @@ function buildRoutes(ctx: Ctx): Router {
   router.get(
     '/orders/:id/invoice',
     authed((req, user) => {
-      const invoice = getInvoice(db, req.params['id'] as string, user.id);
+      const invoice = getInvoice(db, req.params.id as string, user.id);
       if (invoice === undefined) {
         return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
       }
@@ -515,7 +515,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed((req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const id = req.params['id'] as string;
+      const id = req.params.id as string;
       try {
         payOrder(db, id, user.id);
       } catch (err) {
@@ -533,7 +533,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed((req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const id = req.params['id'] as string;
+      const id = req.params.id as string;
       try {
         cancelOrder(db, id, user.id);
       } catch (err) {
@@ -550,7 +550,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed(async (req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const id = req.params['id'] as string;
+      const id = req.params.id as string;
       try {
         const order = getOrder(db, id, user.id);
         const { refund } = refundOrder(db, id, user.id);
@@ -601,16 +601,14 @@ function buildRoutes(ctx: Ctx): Router {
       requireCsrf(req, form);
       try {
         saveAddress(db, user.id, {
-          label: form['label'] ?? '',
-          line1: form['line1'] ?? '',
-          ...(form['line2'] !== undefined && form['line2'] !== '' ? { line2: form['line2'] } : {}),
-          city: form['city'] ?? '',
-          ...(form['region'] !== undefined && form['region'] !== ''
-            ? { region: form['region'] }
-            : {}),
-          postcode: form['postcode'] ?? '',
-          country: form['country'] ?? '',
-          isDefault: form['is_default'] === 'on',
+          label: form.label ?? '',
+          line1: form.line1 ?? '',
+          ...(form.line2 !== undefined && form.line2 !== '' ? { line2: form.line2 } : {}),
+          city: form.city ?? '',
+          ...(form.region !== undefined && form.region !== '' ? { region: form.region } : {}),
+          postcode: form.postcode ?? '',
+          country: form.country ?? '',
+          isDefault: form.is_default === 'on',
         });
       } catch (err) {
         if (err instanceof ValidationError) {
@@ -638,7 +636,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed((req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      deleteAddress(db, req.params['id'] as string, user.id);
+      deleteAddress(db, req.params.id as string, user.id);
       return redirect('/account/addresses');
     }),
   );
@@ -665,7 +663,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed((req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const amount = Number.parseFloat(form['amount'] ?? '0');
+      const amount = Number.parseFloat(form.amount ?? '0');
       try {
         // Form posts major units; convert to integer minor units.
         const minor = Math.round(amount * 100);
@@ -777,7 +775,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed(async (req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const jti = req.params['jti'] as string;
+      const jti = req.params.jti as string;
       const grant = db.prepare('SELECT subject FROM tg_grants WHERE jti = ?').get(jti) as
         | { subject: string | null }
         | undefined;
@@ -786,8 +784,8 @@ function buildRoutes(ctx: Ctx): Router {
       }
       await ctx.tg.tg.revokeGrant(jti, {
         reason:
-          typeof form['reason'] === 'string' && form['reason'] !== ''
-            ? form['reason']
+          typeof form.reason === 'string' && form.reason !== ''
+            ? form.reason
             : 'revoked from account page',
         actor: `user:${user.id}`,
       });
@@ -839,7 +837,7 @@ function buildRoutes(ctx: Ctx): Router {
   router.get(
     '/account/connections/:jti',
     authed(async (req, user) => {
-      const jti = req.params['jti'] as string;
+      const jti = req.params.jti as string;
       const row = db.prepare('SELECT * FROM tg_grants WHERE jti = ?').get(jti) as
         | {
             jti: string;
@@ -939,7 +937,7 @@ function buildRoutes(ctx: Ctx): Router {
   router.get(
     '/account/receipts/:id',
     authed(async (req, user) => {
-      const id = req.params['id'] as string;
+      const id = req.params.id as string;
       const row = db
         .prepare(
           `SELECT r.* FROM tg_receipts r JOIN tg_grants g ON g.jti = r.grant_id
@@ -968,7 +966,7 @@ function buildRoutes(ctx: Ctx): Router {
     authed(async (req, _user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const token = (form['receipt'] ?? '').trim();
+      const token = (form.receipt ?? '').trim();
       const verdict =
         token === ''
           ? ({ kind: 'malformed', reason: 'no token provided' } as ReceiptVerdict)
@@ -1046,8 +1044,8 @@ function buildRoutes(ctx: Ctx): Router {
     authed(async (req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const requestId = form['request_id'] ?? '';
-      const decision = form['decision'] === 'approve' ? 'approve' : 'deny';
+      const requestId = form.request_id ?? '';
+      const decision = form.decision === 'approve' ? 'approve' : 'deny';
       try {
         const outcome = await ctx.tg.tg.decideConsent(requestId, decision, user.id);
         if (outcome.redirectTo !== undefined) {
@@ -1113,8 +1111,8 @@ function buildRoutes(ctx: Ctx): Router {
     authed(async (req, user) => {
       const form = parseForm(req);
       requireCsrf(req, form);
-      const approvalId = form['approval_id'] ?? '';
-      const decision = form['decision'] === 'approve' ? 'approve' : 'deny';
+      const approvalId = form.approval_id ?? '';
+      const decision = form.decision === 'approve' ? 'approve' : 'deny';
       try {
         await ctx.tg.tg.decideRequestApproval(approvalId, decision, user.id);
         return redirect('/account/connections');
@@ -1146,7 +1144,7 @@ function buildRoutes(ctx: Ctx): Router {
     const form = parseForm(req);
     const next = nextPath(req, form);
     try {
-      const user = authenticate(db, form['email'] ?? '', form['password'] ?? '');
+      const user = authenticate(db, form.email ?? '', form.password ?? '');
       const session = createSession(db, user.id);
       return {
         status: 303,
@@ -1184,9 +1182,9 @@ function buildRoutes(ctx: Ctx): Router {
     const next = nextPath(req, form);
     try {
       const user = createUser(db, {
-        email: form['email'] ?? '',
-        name: form['name'] ?? '',
-        password: form['password'] ?? '',
+        email: form.email ?? '',
+        name: form.name ?? '',
+        password: form.password ?? '',
       });
       const session = createSession(db, user.id);
       return {

@@ -103,7 +103,7 @@ describe('discoverSite', () => {
 
   it('rejects a document with a cross-origin endpoint', async () => {
     const doc = makeDiscovery();
-    (doc['endpoints'] as Record<string, string>)['grant_request'] =
+    (doc.endpoints as Record<string, string>).grant_request =
       'https://evil.example.com/tg/grant-request';
     const { transport } = transportWith(doc);
     await assert.rejects(discoverSite(ORIGIN, { transport }), (err) =>

@@ -127,9 +127,9 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
       // tightened to the maximum, never loosened (spec section 9.3).
       constraints: requested.constraints.map((c) =>
         c.type === 'cumulative_budget' &&
-        typeof c.params?.['amount'] === 'number' &&
-        c.params['amount'] > config.maxGrantBudgetMinor &&
-        c.params['currency'] === config.policyCurrency
+        typeof c.params?.amount === 'number' &&
+        c.params.amount > config.maxGrantBudgetMinor &&
+        c.params.currency === config.policyCurrency
           ? {
               type: c.type,
               params: { ...c.params, amount: config.maxGrantBudgetMinor },

@@ -18,13 +18,13 @@ export function describeConstraint(constraint: Constraint): string {
       return `total spending capped at <strong>${esc(formatMoneyWithCurrency(m))}</strong> for the life of this grant`;
     }
     case 'rate_limit': {
-      const max = Number(params['max_requests']);
-      const window = Number(params['window_seconds']);
+      const max = Number(params.max_requests);
+      const window = Number(params.window_seconds);
       return `at most <strong>${esc(String(max))}</strong> requests per ${esc(formatDuration(window))}`;
     }
     case 'valid_window': {
-      const from = Number(params['not_before']);
-      const to = Number(params['not_after']);
+      const from = Number(params.not_before);
+      const to = Number(params.not_after);
       return `usable only between <strong>${esc(formatTime(from))}</strong> and <strong>${esc(formatTime(to))}</strong>`;
     }
     case 'approval_threshold': {

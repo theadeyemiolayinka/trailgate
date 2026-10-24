@@ -83,7 +83,7 @@ describe('parseGrant', () => {
 
   it('rejects payloads missing cnf.jkt', async () => {
     const payload = makeGrantPayload({ jkt: agent.jkt });
-    delete payload['cnf'];
+    delete payload.cnf;
     const token = await signCompactJws(payload, {
       privateJwk: site.privateJwk,
       kid: SITE_KID,
@@ -139,7 +139,7 @@ describe('verifyGrant', () => {
 
   it('rejects grants declaring unknown critical fields', async () => {
     const payload = makeGrantPayload({ jkt: agent.jkt, iat: NOW - 60, exp: NOW + 3600 });
-    payload['critical'] = ['mystery_extension'];
+    payload.critical = ['mystery_extension'];
     const token = await signCompactJws(payload, {
       privateJwk: site.privateJwk,
       kid: SITE_KID,
@@ -157,9 +157,9 @@ describe('signGrant', () => {
     const verified = await verifyGrant(token, DEPS);
     assert.equal(verified.jti, payload.jti);
     const { header } = parseGrant(token);
-    assert.equal(header['typ'], GRANT_TYP);
-    assert.equal(header['kid'], SITE_KID);
-    assert.equal(header['alg'], 'EdDSA');
+    assert.equal(header.typ, GRANT_TYP);
+    assert.equal(header.kid, SITE_KID);
+    assert.equal(header.alg, 'EdDSA');
   });
 });
 

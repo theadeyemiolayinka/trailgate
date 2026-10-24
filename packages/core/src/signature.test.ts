@@ -31,7 +31,7 @@ async function signedRequest(
       privateJwk: keys.privateJwk,
       keyid: 'k_test',
       created: NOW,
-      nonce: 'n_' + 'a'.repeat(24),
+      nonce: `n_${'a'.repeat(24)}`,
       grant: 'grt.jwt.value',
       idempotencyKey: 'idem-1',
       ...overrides,
@@ -124,7 +124,7 @@ describe('checkSignatureWindow', () => {
 
 describe('checkNonceShape', () => {
   it('accepts adequately long nonces', () => {
-    checkNonceShape('n_' + 'a'.repeat(24));
+    checkNonceShape(`n_${'a'.repeat(24)}`);
   });
 
   it('rejects short nonces as signature_invalid', () => {
@@ -138,7 +138,7 @@ describe('signRequest + verification', () => {
     const req = await signedRequest(keys);
     const input = parseTgSignatureInput(req.headers['signature-input'] as string);
     const base = buildSignatureBase(req, input.components, input.entry);
-    const sig = getSignatureBytes(req.headers['signature'] as string);
+    const sig = getSignatureBytes(req.headers.signature as string);
     assert.equal(
       verifySignatureBytes(input.params.alg, publicKeyFromJwk(keys.publicJwk), sig, base),
       true,
@@ -151,7 +151,7 @@ describe('signRequest + verification', () => {
     const input = parseTgSignatureInput(req.headers['signature-input'] as string);
     assert.equal(input.params.alg, 'ecdsa-p256-sha256');
     const base = buildSignatureBase(req, input.components, input.entry);
-    const sig = getSignatureBytes(req.headers['signature'] as string);
+    const sig = getSignatureBytes(req.headers.signature as string);
     assert.equal(
       verifySignatureBytes(input.params.alg, publicKeyFromJwk(keys.publicJwk), sig, base),
       true,
@@ -164,7 +164,7 @@ describe('signRequest + verification', () => {
     const req = await signedRequest(keys);
     const input = parseTgSignatureInput(req.headers['signature-input'] as string);
     const base = buildSignatureBase(req, input.components, input.entry);
-    const sig = getSignatureBytes(req.headers['signature'] as string);
+    const sig = getSignatureBytes(req.headers.signature as string);
     assert.equal(
       verifySignatureBytes(input.params.alg, publicKeyFromJwk(other.publicJwk), sig, base),
       false,
@@ -177,7 +177,7 @@ describe('signRequest + verification', () => {
     const tampered = { ...req, url: 'https://shop.example.com/admin' };
     const input = parseTgSignatureInput(req.headers['signature-input'] as string);
     const base = buildSignatureBase(tampered, input.components, input.entry);
-    const sig = getSignatureBytes(req.headers['signature'] as string);
+    const sig = getSignatureBytes(req.headers.signature as string);
     assert.equal(
       verifySignatureBytes(input.params.alg, publicKeyFromJwk(keys.publicJwk), sig, base),
       false,
@@ -210,7 +210,7 @@ describe('signRequest + verification', () => {
         privateJwk: keys.privateJwk,
         keyid: 'k',
         created: NOW,
-        nonce: 'n_' + 'b'.repeat(24),
+        nonce: `n_${'b'.repeat(24)}`,
         grant: 'grt.jwt.value',
         idempotencyKey: 'idem-1',
       },

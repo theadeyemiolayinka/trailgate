@@ -83,7 +83,7 @@ export async function verifyDiscoverySignatureToken(
       'discovery signature has an unsupported header',
     );
   }
-  const kid = header['kid'];
+  const kid = header.kid;
   const jwk =
     typeof kid === 'string'
       ? keys.find((k) => k.kid === kid || thumbprintOr(k) === kid)

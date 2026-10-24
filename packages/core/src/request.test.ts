@@ -100,7 +100,7 @@ async function makeRequest(
   );
   return {
     req: { method, url, headers, body },
-    grantId: grantPayload['jti'] as string,
+    grantId: grantPayload.jti as string,
   };
 }
 

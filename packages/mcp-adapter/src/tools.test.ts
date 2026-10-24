@@ -147,7 +147,7 @@ describe('createTrailGateTools', () => {
     });
     assert.equal(result.isError, undefined);
     const parsed = JSON.parse(serialized(result)) as Record<string, unknown>;
-    assert.equal(parsed['protocolVersion'], '0.1');
+    assert.equal(parsed.protocolVersion, '0.1');
   });
 
   it('request returns a consent session, wait redeems to metadata', async () => {
@@ -156,8 +156,8 @@ describe('createTrailGateTools', () => {
       permissions: ['tg.order.create'],
     });
     const parsed = JSON.parse(serialized(pending)) as Record<string, unknown>;
-    assert.equal(parsed['status'], 'pending');
-    assert.ok(typeof parsed['consentUrl'] === 'string');
+    assert.equal(parsed.status, 'pending');
+    assert.ok(typeof parsed.consentUrl === 'string');
 
     const issued = await tool(tools, 'trailgate.request').handler({
       url: 'https://shop.example.com',

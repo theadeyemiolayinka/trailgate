@@ -24,7 +24,7 @@ import { createTrailGateTools } from './tools.ts';
  * stdout carries JSON-RPC only; diagnostics go to stderr.
  */
 
-const stateDir = process.env['TRAILGATE_STATE_DIR'] ?? '.trailgate';
+const stateDir = process.env.TRAILGATE_STATE_DIR ?? '.trailgate';
 const pendingPath = join(stateDir, 'pending.json');
 const log = (line: string): void => {
   process.stderr.write(`trailgate-mcp: ${line}\n`);
@@ -86,7 +86,7 @@ for (const tool of tools) {
     const inner = tool.handler;
     tool.handler = async (args) => {
       const out = await inner(args);
-      const requestId = out.structuredContent?.['requestId'];
+      const requestId = out.structuredContent?.requestId;
       if (typeof requestId === 'string') {
         const record = client.exportPending(requestId);
         if (record !== undefined) {
@@ -100,7 +100,7 @@ for (const tool of tools) {
     const inner = tool.handler;
     tool.handler = async (args) => {
       const out = await inner(args);
-      const requestId = args['requestId'];
+      const requestId = args.requestId;
       if (typeof requestId === 'string' && out.isError !== true) {
         await dropPending(requestId);
       }

@@ -36,15 +36,9 @@ import {
 import { createTrailGateTools } from '@trailgate/mcp-adapter';
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = process.env['ANTHROPIC_MODEL'] ?? 'claude-sonnet-4-5';
-const API_KEY = process.env['ANTHROPIC_API_KEY'];
-const STATE_DIR = process.env['TRAILGATE_STATE_DIR'] ?? '.trailgate';
-const GATED = new Set([
-  'trailgate.request',
-  'trailgate.redeem',
-  'trailgate.fetch',
-  'trailgate.revoke',
-]);
+const MODEL = process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5';
+const API_KEY = process.env.ANTHROPIC_API_KEY;
+const STATE_DIR = process.env.TRAILGATE_STATE_DIR ?? '.trailgate';
 
 if (API_KEY === undefined || API_KEY === '') {
   console.error('ANTHROPIC_API_KEY is required. Set it in your environment; do not paste it here.');
@@ -78,7 +72,7 @@ const tools = createTrailGateTools(client, {
   // itself still happens on the site's own page; this gate only decides
   // whether the agent may take the action at all.
   beforeAction: async (toolName, args) => {
-    if (toolName === 'trailgate.fetch' && String(args['method'] ?? 'GET') === 'GET') {
+    if (toolName === 'trailgate.fetch' && String(args.method ?? 'GET') === 'GET') {
       return; // reads still gate on grant checks server-side
     }
     const allowed = await confirm(`agent wants ${toolName} ${JSON.stringify(args)}.`);
@@ -140,40 +134,40 @@ async function runTask(task: string): Promise<void> {
   const messages: Message[] = [{ role: 'user', content: task }];
   for (let round = 0; round < 24; round += 1) {
     const res = await callApi(messages);
-    const content = (res['content'] ?? []) as Record<string, unknown>[];
+    const content = (res.content ?? []) as Record<string, unknown>[];
     messages.push({ role: 'assistant', content });
     for (const block of content) {
-      if (block['type'] === 'text' && typeof block['text'] === 'string') {
-        console.log(`\n${block['text']}`);
+      if (block.type === 'text' && typeof block.text === 'string') {
+        console.log(`\n${block.text}`);
       }
     }
-    if (res['stop_reason'] !== 'tool_use') {
+    if (res.stop_reason !== 'tool_use') {
       return;
     }
     const results: Record<string, unknown>[] = [];
     for (const block of content) {
-      if (block['type'] !== 'tool_use') {
+      if (block.type !== 'tool_use') {
         continue;
       }
-      const tool = byApiName.get(String(block['name']));
+      const tool = byApiName.get(String(block.name));
       const args =
-        typeof block['input'] === 'object' && block['input'] !== null
-          ? (block['input'] as Record<string, unknown>)
+        typeof block.input === 'object' && block.input !== null
+          ? (block.input as Record<string, unknown>)
           : {};
       let toolResult: unknown;
       if (tool === undefined) {
-        toolResult = { error: { code: 'agent.error', message: `unknown tool ${block['name']}` } };
+        toolResult = { error: { code: 'agent.error', message: `unknown tool ${block.name}` } };
       } else {
         const out = await tool.handler(args);
         toolResult = out.structuredContent ?? { text: out.content[0]?.text ?? '' };
-        const consentUrl = (out.structuredContent ?? {})['consentUrl'];
+        const consentUrl = out.structuredContent?.consentUrl;
         if (typeof consentUrl === 'string') {
           console.log(`\nHuman approval required. Open this URL and decide:\n  ${consentUrl}\n`);
         }
       }
       results.push({
         type: 'tool_result',
-        tool_use_id: block['id'],
+        tool_use_id: block.id,
         content: JSON.stringify(toolResult),
       });
     }

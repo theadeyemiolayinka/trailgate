@@ -44,14 +44,14 @@ export function decodeCompactJws(token: string): DecodedJws {
 }
 
 export function checkJwsHeader(header: Record<string, unknown>, expectedTyp: string): JwtAlgorithm {
-  const alg = header['alg'];
+  const alg = header.alg;
   if (typeof alg !== 'string' || !ALLOWED_JWT_ALGORITHMS.includes(alg as JwtAlgorithm)) {
     throw new TrailGateError(Codes.GRANT_MALFORMED, 'unsupported jws alg');
   }
-  if (header['typ'] !== expectedTyp) {
+  if (header.typ !== expectedTyp) {
     throw new TrailGateError(Codes.GRANT_MALFORMED, `unexpected typ: expected ${expectedTyp}`);
   }
-  if (header['crit'] !== undefined) {
+  if (header.crit !== undefined) {
     throw new TrailGateError(Codes.GRANT_MALFORMED, 'crit header parameters are not supported');
   }
   for (const name of FORBIDDEN_HEADER_PARAMS) {

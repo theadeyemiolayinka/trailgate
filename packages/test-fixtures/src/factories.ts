@@ -77,7 +77,7 @@ export function makeGrantPayload(input: GrantPayloadInput): Record<string, unkno
     },
   };
   if (input.sub !== undefined) {
-    payload['sub'] = input.sub;
+    payload.sub = input.sub;
   }
   return payload;
 }
@@ -100,7 +100,7 @@ export function makeGrantRequest(input: {
     code_challenge_method: 'S256',
   };
   if (input.redirectUri !== undefined) {
-    body['redirect_uri'] = input.redirectUri;
+    body.redirect_uri = input.redirectUri;
   }
   return body;
 }

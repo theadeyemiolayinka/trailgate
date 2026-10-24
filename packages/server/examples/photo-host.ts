@@ -20,7 +20,7 @@ import {
 } from '@trailgate/server';
 
 const ISSUER = 'https://photos.example.com';
-const PORT = Number(process.env['PORT'] ?? 8787);
+const PORT = Number(process.env.PORT ?? 8787);
 
 const albums = new Map<string, { owner: string; photos: string[] }>([
   ['alb_f1', { owner: 'user_1', photos: [] }],
@@ -40,7 +40,7 @@ const tg = createTrailGateServer({
 });
 
 const sessionUser = (req: HostRequest) =>
-  sessions.get(req.headers['cookie']?.replace('session=', '') ?? '');
+  sessions.get(req.headers.cookie?.replace('session=', '') ?? '');
 
 const bodyJson = (req: HostRequest): Record<string, unknown> => {
   const text =
@@ -70,8 +70,8 @@ async function routes(req: HostRequest): Promise<HostResponse> {
     if (user === undefined) return { status: 401, body: { error: 'login' } };
     const body = bodyJson(req);
     const outcome = await tg.decideConsent(
-      body['request_id'] as string,
-      body['approve'] === true ? 'approve' : 'deny',
+      body.request_id as string,
+      body.approve === true ? 'approve' : 'deny',
       user,
     );
     return { status: 200, body: outcome };

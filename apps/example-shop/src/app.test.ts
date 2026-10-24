@@ -189,7 +189,7 @@ test('browser flow: register, login, cart, checkout pays from wallet', async () 
     formBody({ _csrf: csrf, address_id: '' }),
   );
   assert.equal(checkout.status, 303);
-  const orderId = (checkout.headers?.['location'] ?? '').split('/orders/')[1] as string;
+  const orderId = (checkout.headers?.location ?? '').split('/orders/')[1] as string;
   const order = getOrder(db, orderId, userId);
   assert.equal(order?.status, 'paid');
   assert.equal(getWallet(db, userId).balance.amount, 10_000 - 4800);

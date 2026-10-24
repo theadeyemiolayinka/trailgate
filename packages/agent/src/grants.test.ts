@@ -100,7 +100,7 @@ describe('submitGrantRequest', () => {
     assert.equal(req?.method, 'POST');
     assert.equal(req?.url, `${ORIGIN}/tg/grant-request`);
     assert.equal(req?.headers?.['content-type'], 'application/json');
-    assert.equal(requestJson(req as never)['code_challenge'], body.code_challenge);
+    assert.equal(requestJson(req as never).code_challenge, body.code_challenge);
     assert.equal(session.requestId, 'req_123');
     assert.equal(session.expiresAt, 1700000900);
   });
@@ -145,8 +145,8 @@ describe('redeemGrantRequest', () => {
     const result = await redeemGrantRequest(ctx, 'req_123', 'the-verifier', transport);
     assert.equal(result.grant, 'aaa.bbb.ccc');
     const sent = requestJson(requests[0] as never);
-    assert.equal(sent['request_id'], 'req_123');
-    assert.equal(sent['code_verifier'], 'the-verifier');
+    assert.equal(sent.request_id, 'req_123');
+    assert.equal(sent.code_verifier, 'the-verifier');
   });
 
   it('surfaces tg.grant.redeemed on replay', async () => {

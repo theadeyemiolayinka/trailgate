@@ -100,7 +100,7 @@ describe('buildProtectedRequestHeaders', () => {
     const ok = verifySignatureBytes(
       'ed25519',
       publicKeyFromJwk(signer.publicJwk),
-      getSignatureBytes(headers['signature'] as string),
+      getSignatureBytes(headers.signature as string),
       rebuilt,
     );
     assert.equal(ok, true, 'signature must verify under the agent public key');

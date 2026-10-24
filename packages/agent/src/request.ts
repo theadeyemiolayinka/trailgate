@@ -101,7 +101,7 @@ export async function buildProtectedRequestHeaders(
   );
   const signature = await signer.sign(signatureBase);
   headers['signature-input'] = `tg=${serializeSignatureParams(entry)}`;
-  headers['signature'] = `tg=:${Buffer.from(signature).toString('base64')}:`;
+  headers.signature = `tg=:${Buffer.from(signature).toString('base64')}:`;
   return { headers, signatureBase };
 }
 

@@ -526,8 +526,8 @@ describe('approval_threshold lifecycle', () => {
     assert.equal(blocked.status, 403);
     assert.equal(errorCode(blocked), Codes.CONSTRAINT_APPROVAL_REQUIRED);
     const detail = (blocked.body as { error?: { detail?: Record<string, unknown> } }).error?.detail;
-    assert.ok(typeof detail?.['approval_url'] === 'string');
-    assert.ok((detail['approval_url'] as string).startsWith(`${ISSUER}/`));
+    assert.ok(typeof detail?.approval_url === 'string');
+    assert.ok((detail.approval_url as string).startsWith(`${ISSUER}/`));
     const approvalId = approvalIdOf(blocked);
 
     // Another subject cannot decide for this grant's owner.

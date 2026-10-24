@@ -288,18 +288,18 @@ export function createTrailGateTools(
         try {
           const result = await client.checkAccess(requireString(args, 'url'), {
             permissions: stringList(args, 'permissions'),
-            confirmFresh: args['fresh'] === true,
+            confirmFresh: args.fresh === true,
           });
           const view: Record<string, unknown> = { status: result.status };
           if ('grant' in result) {
-            view['grant'] = grantView(result.grant);
+            view.grant = grantView(result.grant);
           }
           if (result.status === 'insufficient_permission') {
-            view['missing'] = result.missing;
+            view.missing = result.missing;
           }
           if (result.status === 'unsupported_version') {
-            view['site'] = result.site;
-            view['client'] = result.client;
+            view.site = result.site;
+            view.client = result.client;
           }
           return ok(view);
         } catch (err) {
@@ -429,7 +429,7 @@ export function createTrailGateTools(
           await client.revokeGrant(requireString(args, 'url'), requireString(args, 'grantId'), {
             ...(typeof args.reason === 'string' ? { reason: args.reason } : {}),
           });
-          return ok({ revoked: args['grantId'] });
+          return ok({ revoked: args.grantId });
         } catch (err) {
           return fail(err);
         }

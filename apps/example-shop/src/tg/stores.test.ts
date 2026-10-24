@@ -268,7 +268,7 @@ test('spending ledger: spend_window headroom and consumedInWindow', async () => 
     (err: unknown) =>
       err instanceof TrailGateError &&
       err.code === Codes.CONSTRAINT_VIOLATED &&
-      err.detail?.['type'] === 'spend_window',
+      err.detail?.type === 'spend_window',
   );
   await ledger.consume('rsv_1', at);
   assert.equal(await ledger.consumedInWindow?.('grt_1', 'USD', 3600, at), 4000);

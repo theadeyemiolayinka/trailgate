@@ -32,8 +32,7 @@ describe('validateDiscoveryDocument', () => {
 
   it('rejects cross-origin endpoints', () => {
     const doc = makeDiscovery();
-    (doc['endpoints'] as Record<string, string>)['grant_request'] =
-      'https://attacker.example.net/tg';
+    (doc.endpoints as Record<string, string>).grant_request = 'https://attacker.example.net/tg';
     expectCode(Codes.DISCOVERY_INVALID, () => validateDiscoveryDocument(doc, OPTS));
   });
 
@@ -66,7 +65,7 @@ describe('validateDiscoveryDocument', () => {
 
   it('rejects documents missing required fields', () => {
     const doc = makeDiscovery();
-    delete doc['signing_keys'];
+    delete doc.signing_keys;
     expectCode(Codes.DISCOVERY_INVALID, () => validateDiscoveryDocument(doc, OPTS));
   });
 });

@@ -250,8 +250,7 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
           for (const entry of await client.listActions(url)) {
             const resource = entry.action.resource;
             if (
-              resource !== undefined &&
-              resource.includes('{user}') &&
+              resource?.includes('{user}') &&
               wanted.has(entry.action.permission) &&
               !derived.includes(resource)
             ) {
@@ -347,14 +346,14 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
         });
         const view: Record<string, unknown> = { status: result.status };
         if ('grant' in result) {
-          view['grant'] = grantView(result.grant);
+          view.grant = grantView(result.grant);
         }
         if (result.status === 'insufficient_permission') {
-          view['missing'] = result.missing;
+          view.missing = result.missing;
         }
         if (result.status === 'unsupported_version') {
-          view['site'] = result.site;
-          view['client'] = result.client;
+          view.site = result.site;
+          view.client = result.client;
         }
         print(view);
         return result.status === 'ready' ? 0 : 1;

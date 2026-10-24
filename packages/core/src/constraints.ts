@@ -40,8 +40,8 @@ function asInteger(value: unknown, name: string): number {
 }
 
 function checkMoneyShape(params: Record<string, unknown>): { amount: number; currency: string } {
-  const amount = asInteger(params['amount'], 'amount');
-  const currency = params['currency'];
+  const amount = asInteger(params.amount, 'amount');
+  const currency = params.currency;
   if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
     throw new TrailGateError(
       Codes.CONSTRAINT_VIOLATED,
@@ -107,8 +107,8 @@ async function evaluateRateLimit(
   params: Record<string, unknown>,
   ctx: ConstraintContext,
 ): Promise<void> {
-  const maxRequests = asInteger(params['max_requests'], 'max_requests');
-  const windowSeconds = asInteger(params['window_seconds'], 'window_seconds');
+  const maxRequests = asInteger(params.max_requests, 'max_requests');
+  const windowSeconds = asInteger(params.window_seconds, 'window_seconds');
   if (ctx.rateLimiter === undefined) {
     throw new TrailGateError(
       Codes.INTERNAL_UNAVAILABLE,
@@ -134,7 +134,7 @@ async function evaluateSpendWindow(
   ctx: ConstraintContext,
 ): Promise<void> {
   const budget = checkMoneyShape(params);
-  const windowSeconds = asInteger(params['window_seconds'], 'window_seconds');
+  const windowSeconds = asInteger(params.window_seconds, 'window_seconds');
   if (windowSeconds < 1) {
     throw new TrailGateError(Codes.CONSTRAINT_VIOLATED, 'spend_window window must be positive', {
       type: 'spend_window',
@@ -236,8 +236,8 @@ async function evaluateApprovalThreshold(
 }
 
 function evaluateValidWindow(params: Record<string, unknown>, ctx: ConstraintContext): void {
-  const notBefore = asInteger(params['not_before'], 'not_before');
-  const notAfter = asInteger(params['not_after'], 'not_after');
+  const notBefore = asInteger(params.not_before, 'not_before');
+  const notAfter = asInteger(params.not_after, 'not_after');
   if (ctx.now < notBefore || ctx.now > notAfter) {
     throw new TrailGateError(Codes.CONSTRAINT_VIOLATED, 'outside valid_window', {
       type: 'valid_window',

@@ -56,7 +56,7 @@ describe('FileGrantStore', () => {
     const raw = JSON.parse(await readFile(store.path, 'utf8')) as Record<string, unknown>[];
     const first = raw[0];
     assert.ok(first !== undefined);
-    first['jti'] = 'grt_forged';
+    first.jti = 'grt_forged';
     await writeFile(store.path, JSON.stringify(raw), 'utf8');
     assert.equal(
       (await store.list()).length,

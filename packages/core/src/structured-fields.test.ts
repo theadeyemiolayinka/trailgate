@@ -30,9 +30,9 @@ describe('parseSignatureInput', () => {
       entry.components.map((c) => c.value),
       ['@method', '@path'],
     );
-    assert.equal(entry.params['keyid'], 'k_1');
-    assert.equal(entry.params['created'], 1700000000);
-    assert.equal(entry.params['nonce'], 'n_1');
+    assert.equal(entry.params.keyid, 'k_1');
+    assert.equal(entry.params.created, 1700000000);
+    assert.equal(entry.params.nonce, 'n_1');
   });
 
   it('parses multiple signature labels', () => {
@@ -40,8 +40,8 @@ describe('parseSignatureInput', () => {
       'a=("@method");keyid="k1";created=1, b=("@path");keyid="k2";created=2',
     );
     assert.equal(entries.size, 2);
-    assert.equal(entries.get('a')?.params['keyid'], 'k1');
-    assert.equal(entries.get('b')?.params['keyid'], 'k2');
+    assert.equal(entries.get('a')?.params.keyid, 'k1');
+    assert.equal(entries.get('b')?.params.keyid, 'k2');
   });
 
   it('rejects duplicate labels', () => {
@@ -100,7 +100,7 @@ describe('serializeSignatureParams', () => {
       parsed.components.map((c) => c.value),
       ['@method', 'content-digest'],
     );
-    assert.equal(parsed.params['created'], 1700000000);
-    assert.equal(parsed.params['tag'], 'trailgate');
+    assert.equal(parsed.params.created, 1700000000);
+    assert.equal(parsed.params.tag, 'trailgate');
   });
 });

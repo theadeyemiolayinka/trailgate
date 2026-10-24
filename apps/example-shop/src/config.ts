@@ -50,7 +50,7 @@ function intFromEnv(name: string, fallback: number): number {
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ShopConfig {
   const tlsPort = intFromEnv('SHOP_TLS_PORT', 3443);
-  const issuer = env['SHOP_ISSUER'] ?? `https://localhost:${tlsPort}`;
+  const issuer = env.SHOP_ISSUER ?? `https://localhost:${tlsPort}`;
   const issuerUrl = new URL(issuer);
   if (issuerUrl.protocol !== 'https:' || issuerUrl.pathname !== '/' || issuerUrl.search !== '') {
     throw new Error('SHOP_ISSUER must be a bare https origin (scheme, host, optional port)');
@@ -59,10 +59,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ShopConfig {
     issuer: issuerUrl.origin,
     httpPort: intFromEnv('SHOP_PORT', 3300),
     tlsPort,
-    tls: env['SHOP_TLS'] === '1' || env['SHOP_TLS'] === 'true',
-    dbPath: env['SHOP_DB'] ?? join(appRoot, 'data', 'example-shop.db'),
-    seed: env['SHOP_SEED'] !== '0',
-    certsDir: env['SHOP_CERTS_DIR'] ?? join(appRoot, 'dev-certs'),
+    tls: env.SHOP_TLS === '1' || env.SHOP_TLS === 'true',
+    dbPath: env.SHOP_DB ?? join(appRoot, 'data', 'example-shop.db'),
+    seed: env.SHOP_SEED !== '0',
+    certsDir: env.SHOP_CERTS_DIR ?? join(appRoot, 'dev-certs'),
     maxChargeMinor: intFromEnv('SHOP_MAX_CHARGE_MINOR', 10_000),
     maxGrantBudgetMinor: intFromEnv('SHOP_MAX_GRANT_BUDGET_MINOR', 50_000),
     policyCurrency: 'USD',

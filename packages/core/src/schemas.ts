@@ -28,7 +28,7 @@ function loadSpecSchemaFiles(): Map<string, Record<string, unknown>> {
       continue;
     }
     const schema = JSON.parse(readFileSync(new URL(file, dir), 'utf8')) as Record<string, unknown>;
-    const id = schema['$id'];
+    const id = schema.$id;
     if (typeof id !== 'string') {
       throw new TrailGateError(Codes.INTERNAL_ERROR, `schema ${file} has no $id`);
     }

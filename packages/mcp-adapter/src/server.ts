@@ -48,7 +48,7 @@ export async function handleMcpMessage(
   const method = message.method;
   switch (method) {
     case 'initialize': {
-      const requested = message.params?.['protocolVersion'];
+      const requested = message.params?.protocolVersion;
       return result(id, {
         protocolVersion: typeof requested === 'string' ? requested : MCP_PROTOCOL_VERSION,
         capabilities: { tools: {} },
@@ -67,22 +67,22 @@ export async function handleMcpMessage(
       });
     case 'tools/call': {
       const params = message.params ?? {};
-      const name = params['name'];
+      const name = params.name;
       const tool = tools.find((t) => t.name === name);
       if (tool === undefined) {
         return rpcError(id, -32602, `unknown tool ${String(name)}`);
       }
-      const args = params['arguments'];
+      const args = params.arguments;
       try {
         const out: ToolResult = await tool.handler(
           typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : {},
         );
         const value: Record<string, unknown> = { content: out.content };
         if (out.structuredContent !== undefined) {
-          value['structuredContent'] = out.structuredContent;
+          value.structuredContent = out.structuredContent;
         }
         if (out.isError === true) {
-          value['isError'] = true;
+          value.isError = true;
         }
         return result(id, value);
       } catch (err) {
