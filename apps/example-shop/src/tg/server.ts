@@ -8,6 +8,7 @@ import type { ShopPolicy } from '../policy.ts';
 import type { SqliteAuditSink } from './stores.ts';
 import {
   createAgentKeyDirectory,
+  createApprovalStore,
   createAuditSink,
   createGrantRegistry,
   createGrantRequestStore,
@@ -103,6 +104,7 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
       ledger: createSpendingLedger(db, now),
       rateLimiter: createRateLimiter(db),
       audit,
+      approvals: createApprovalStore(db),
     },
     subjectFor: (userId) => userId,
     resourceOwners: { ownerOf: async (selector) => ownerOf(db, selector) },

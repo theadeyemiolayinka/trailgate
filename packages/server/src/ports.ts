@@ -160,6 +160,78 @@ export interface SpendingLedger extends Ledger {
   postRefund(input: { grantId: string; amount: Money; now: number }): Promise<void>;
 }
 
+/** Lifecycle states of a per-request human approval (spec section 9.2/12.4). */
+export type RequestApprovalState = 'pending' | 'approved' | 'denied' | 'used';
+
+/**
+ * A recorded human approval for one protected operation under
+ * `approval_threshold`. Bound to the operation digest (method, target URI,
+ * `Content-Digest`, grant `jti`), so an approval can never be swapped onto
+ * a different request; single-use via the `consumeApproved` transition.
+ */
+export interface RequestApprovalRecord {
+  id: string;
+  grantId: string;
+  operationDigest: string;
+  amount: Money;
+  state: RequestApprovalState;
+  createdAt: number;
+  expiresAt: number;
+  decidedAt?: number;
+}
+
+/**
+ * Per-request approval store (spec section 12.4). The read side satisfies
+ * core's `RequestApprovalChecker`; the transitions are CAS-style so a single
+ * approval can never authorize two executions.
+ */
+export interface RequestApprovalStore {
+  /**
+   * Creates a pending record for `(grantId, operationDigest)`, or returns
+   * the live pending/approved one already recorded. Used by the denial path
+   * to hand the agent a stable `approval_url`.
+   */
+  requestApproval(input: {
+    id: string;
+    grantId: string;
+    operationDigest: string;
+    amount: Money;
+    now: number;
+    ttlSeconds: number;
+  }): Promise<RequestApprovalRecord>;
+  get(id: string): Promise<RequestApprovalRecord | undefined>;
+  /**
+   * Atomically transitions `pending -> approved|denied`. Returns undefined
+   * when the record is absent, expired, or no longer pending.
+   */
+  decide(
+    id: string,
+    decision: 'approve' | 'deny',
+    now: number,
+  ): Promise<RequestApprovalRecord | undefined>;
+  /** Live approved record for the operation, or undefined (read side). */
+  peekApproved(
+    grantId: string,
+    operationDigest: string,
+    now: number,
+  ): Promise<RequestApprovalRecord | undefined>;
+  /**
+   * Atomically transitions `approved -> used` for the operation's live
+   * approved record. Returns the record, or undefined when none was
+   * approved: exactly one concurrent request may consume an approval.
+   */
+  consumeApproved(
+    grantId: string,
+    operationDigest: string,
+    now: number,
+  ): Promise<RequestApprovalRecord | undefined>;
+  /**
+   * Returns a `used` record to `approved` when the operation it authorized
+   * failed to execute, so the human's decision survives a retry.
+   */
+  restore(id: string, now: number): Promise<void>;
+}
+
 /** The outcome recorded for an `Idempotency-Key` and returned on replay. */
 export interface StoredOutcome {
   status: number;

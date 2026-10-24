@@ -14,9 +14,12 @@ export function openDatabase(path: string): Db {
     mkdirSync(dirname(path), { recursive: true });
   }
   const db = new DatabaseSync(path);
+  // busy_timeout must precede journal_mode: the WAL switch takes a lock that
+  // cannot wait on the default zero timeout, so a second process opening the
+  // database while a writer holds it would fail with "database is locked".
+  db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
-  db.exec('PRAGMA busy_timeout = 5000');
   migrate(db);
   return db;
 }
@@ -246,6 +249,23 @@ const MIGRATIONS: Migration[] = [
         created_at INTEGER NOT NULL
       );
       CREATE INDEX idx_tg_receipts_grant ON tg_receipts(grant_id, created_at);
+    `,
+  },
+  {
+    id: 5,
+    sql: `
+      CREATE TABLE tg_request_approvals (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL,
+        operation_digest TEXT NOT NULL,
+        amount_minor INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending','approved','denied','used')),
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        decided_at INTEGER
+      );
+      CREATE INDEX idx_tg_approvals_op ON tg_request_approvals(grant_id, operation_digest, state, expires_at);
     `,
   },
 ];

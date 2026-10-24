@@ -171,13 +171,14 @@ A constraint is `{ "type": "<name>", "params": { ... } }`. The `type` registry i
 | `rate_limit` | `{ "max_requests": int, "window_seconds": int }` | At most `max_requests` protected requests per rolling `window_seconds` under this grant. |
 | `valid_window` | `{ "not_before": int, "not_after": int }` | Requests outside `[not_before, not_after]` unix seconds are denied. Narrower than `exp`; both apply. |
 | `spend_window` | `{ "amount": int, "currency": "XXX", "window_seconds": int }` | The sum of consumed ledger entries in the last `window_seconds` (rolling) plus live reservations and this request MUST NOT exceed `amount` minor units. Enforced inside the atomic reservation check per section 12. |
+| `approval_threshold` | `{ "amount": int, "currency": "XXX" }` | A request carrying a monetary amount above `amount` minor units MUST be denied with `tg.constraint.approval_required` until the grant subject records a per-operation human approval (section 12.4). A different currency fails closed. |
 
 Only the types in this table are registered for 0.1. Everything else is unsupported and fails closed, never silently ignored:
 
 - A grant request proposing an unregistered type MUST be rejected at intake with `tg.grant.scope_rejected`.
 - If an unregistered type ever reaches an issued grant, evaluators MUST deny every request under it with `tg.constraint.unknown_type`.
 
-Examples of policy shapes deliberately not in 0.1: threshold-triggered re-approval (for example "spend above X needs a fresh human decision"), disjunctive constraints ("either budget A or budget B"), wildcard or prefix resource scope, percentage-of-balance limits, and per-product or per-category conditions. Sites needing such policies either implement them as application-level authorization (section 11.3 stage 13) behind `tg.*` permissions they advertise, or wait for a later registry version. A site MUST NOT express them as unregistered constraint types and hope evaluators guess.
+Examples of policy shapes deliberately not in 0.1: disjunctive constraints ("either budget A or budget B"), wildcard or prefix resource scope, percentage-of-balance limits, and per-product or per-category conditions. Sites needing such policies either implement them as application-level authorization (section 11.3 stage 13) behind `tg.*` permissions they advertise, or wait for a later registry version. A site MUST NOT express them as unregistered constraint types and hope evaluators guess.
 
 ### 9.3 Combination and inheritance
 
@@ -291,9 +292,19 @@ Any required check the site cannot perform (signature verification infrastructur
   2. `consume`: on successful operation, the reservation converts to a consumed entry.
   3. `release`: on failure or abandonment, the reservation converts to a released entry and its headroom returns.
 - Reservations expire. A reservation not consumed or released within a site-defined TTL (RECOMMENDED: 300 seconds) releases automatically.
-- Refunds post as new offsetting consumed entries (negative amounts) attributed to the grant; they restore headroom.
+- Refunds post as new offsetting consumed entries (negative amounts) attributed to the grant; they restore headroom. The same offsetting semantics apply to `spend_window`: a refund inside the window lowers the windowed sum, a refund after the window rolled off has no effect on it.
 - Reconciliation: per-grant ledger entries are the source of truth for `cumulative_budget` evaluation and for receipt `amounts` reporting. The audit log records every transition.
 - A grant with no `cumulative_budget` constraint has no spending cap from TrailGate; the site's own rules still apply.
+
+### 12.4 Per-request approvals (`approval_threshold`)
+
+When a monetary request exceeds an `approval_threshold` constraint, the request MUST be denied with `tg.constraint.approval_required`, and the denial's `detail` SHOULD carry `approval_id` and `approval_url` pointing at the site's human decision surface.
+
+- An approval record binds to the operation digest (section 11.4: method, target URI, `Content-Digest`, grant `jti`). It can never authorize a different request, a different amount, or a different grant.
+- Lifecycle: `pending -> approved -> used`, or `pending -> denied`; pending and approved records expire after a site-defined TTL (RECOMMENDED: 600 seconds).
+- Only the user context (`sub`) the grant was issued under MAY decide, through the site's own authenticated surface. Approval of one operation is single-use: the transition `approved -> used` MUST be atomic, so two concurrent requests carrying the same operation cannot both execute on one approval.
+- A request whose handler fails or denies at the business layer releases the approval back to `approved`, so the human decision survives a retry of the same operation. An `Idempotency-Key` replay returns the stored outcome without consuming an approval.
+- Records, transitions, and decisions appear in the audit log as `request_approval.requested` and `request_approval.decided`.
 
 ## 13. Expiry, revocation, and rotation
 
@@ -352,6 +363,8 @@ The site records audit events for security-relevant transitions. Required event 
 | `request.denied` | Any denial | `jti`, `code`, `stage` |
 | `reservation.created/consumed/released` | Ledger transitions | `jti`, `amount`, `currency`, `reservation_id` |
 | `idempotency.record_failed` | Outcome write failed after a successful claim; the pending record would answer `tg.request.idempotency_in_flight` to retries until reclaimed | `jti`, `detail` |
+| `request_approval.requested` | `approval_threshold` denial issued an approval record | `jti`, `detail.approval_id` |
+| `request_approval.decided` | User decision on a request approval | `jti`, `decision`, `sub`, `detail.approval_id` |
 | `key.rotated` | Site or agent key rotation event | `old_jkt`, `new_jkt` |
 
 Events are append-only, timestamped, and retained per site policy. The audit mechanism itself is implementation-defined; the event vocabulary is the contract.

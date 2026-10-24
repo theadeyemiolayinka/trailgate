@@ -1,5 +1,6 @@
 export const packageName = '@trailgate/server';
 
+export * from './approvals.ts';
 export * from './config.ts';
 export * from './discovery.ts';
 export * from './enforcement.ts';

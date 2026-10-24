@@ -497,3 +497,140 @@ describe('grant revocation endpoint', () => {
     assert.equal(errorCode(res), Codes.GRANT_UNKNOWN);
   });
 });
+
+describe('approval_threshold lifecycle', () => {
+  const ABOVE = { amount: 6_500, currency: 'USD' };
+
+  async function thresholdGrant(server: TrailGateServer) {
+    return issueGrant(server, {
+      permissions: ['tg.wallet.charge'],
+      constraints: [
+        { type: 'approval_threshold', params: { amount: 5_000, currency: 'USD' } },
+        { type: 'cumulative_budget', params: { amount: 40_000, currency: 'USD' } },
+      ],
+    });
+  }
+
+  function approvalIdOf(res: HostResponse): string {
+    const detail = (res.body as { error?: { detail?: { approval_id?: string } } }).error?.detail;
+    assert.ok(detail?.approval_id !== undefined, 'expected an approval_id in the denial');
+    return detail.approval_id;
+  }
+
+  it('denies above the threshold with a decision surface, then executes once approved', async () => {
+    const server = makeServer();
+    const grant = await thresholdGrant(server);
+    const handler = server.protect({ permission: 'tg.wallet.charge', amount: ABOVE }, okHandler);
+
+    const blocked = await handler(await signedRequest(grant.token));
+    assert.equal(blocked.status, 403);
+    assert.equal(errorCode(blocked), Codes.CONSTRAINT_APPROVAL_REQUIRED);
+    const detail = (blocked.body as { error?: { detail?: Record<string, unknown> } }).error?.detail;
+    assert.ok(typeof detail?.['approval_url'] === 'string');
+    assert.ok((detail['approval_url'] as string).startsWith(`${ISSUER}/`));
+    const approvalId = approvalIdOf(blocked);
+
+    // Another subject cannot decide for this grant's owner.
+    await assert.rejects(
+      server.decideRequestApproval(approvalId, 'approve', 'user_2'),
+      (err: unknown) => err instanceof TrailGateError && err.code === Codes.AUTHORIZATION_DENIED,
+    );
+
+    await server.decideRequestApproval(approvalId, 'approve', 'user_1');
+    const paid = await handler(await signedRequest(grant.token));
+    assert.equal(paid.status, 200);
+
+    // Single use: the same operation needs a fresh human decision.
+    const again = await handler(await signedRequest(grant.token));
+    assert.equal(errorCode(again), Codes.CONSTRAINT_APPROVAL_REQUIRED);
+  });
+
+  it('two concurrent requests cannot spend one approval', async () => {
+    const server = makeServer();
+    const grant = await thresholdGrant(server);
+    let calls = 0;
+    const handler = server.protect({ permission: 'tg.wallet.charge', amount: ABOVE }, () => {
+      calls += 1;
+      return { status: 200, body: { ok: true } };
+    });
+
+    const blocked = await handler(await signedRequest(grant.token));
+    await server.decideRequestApproval(approvalIdOf(blocked), 'approve', 'user_1');
+
+    // Race two signed requests carrying the same operation digest: both pass
+    // the constraint peek, but consumeApproved only flips one.
+    const [a, b] = await Promise.all([
+      handler(await signedRequest(grant.token)),
+      handler(await signedRequest(grant.token)),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    assert.deepEqual(statuses, [200, 403]);
+    assert.equal(calls, 1);
+  });
+
+  it('a failed handler restores the approval for retry', async () => {
+    const server = makeServer();
+    const grant = await thresholdGrant(server);
+    let failOnce = true;
+    const handler = server.protect({ permission: 'tg.wallet.charge', amount: ABOVE }, () => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('downstream failed');
+      }
+      return { status: 200, body: { ok: true } };
+    });
+
+    const blocked = await handler(await signedRequest(grant.token));
+    await server.decideRequestApproval(approvalIdOf(blocked), 'approve', 'user_1');
+
+    const failed = await handler(await signedRequest(grant.token));
+    assert.equal(failed.status, 500);
+    // The human decision survives the failure: the retry runs without a
+    // second trip to the approval page.
+    const retry = await handler(await signedRequest(grant.token));
+    assert.equal(retry.status, 200);
+  });
+
+  it('a denied approval never executes, and revocation still wins over an approval', async () => {
+    const server = makeServer();
+    const grant = await thresholdGrant(server);
+    const handler = server.protect({ permission: 'tg.wallet.charge', amount: ABOVE }, okHandler);
+
+    const blocked = await handler(await signedRequest(grant.token));
+    await server.decideRequestApproval(approvalIdOf(blocked), 'deny', 'user_1');
+    const retry = await handler(await signedRequest(grant.token));
+    assert.equal(retry.status, 403);
+    assert.equal(errorCode(retry), Codes.CONSTRAINT_APPROVAL_REQUIRED);
+
+    await server.decideRequestApproval(approvalIdOf(retry), 'approve', 'user_1');
+    await server.revokeGrant(grant.jti, { reason: 'test', actor: 'user_1' });
+    const revoked = await handler(await signedRequest(grant.token));
+    assert.equal(errorCode(revoked), Codes.GRANT_REVOKED);
+  });
+});
+
+describe('store failure fails closed', () => {
+  it('a dead audit sink denies rather than skipping accountability', async () => {
+    let down = false;
+    let seq = 0;
+    const audit = {
+      record: async () => {
+        if (down) {
+          throw new Error('audit store down');
+        }
+        seq += 1;
+        return `evt_${seq}`;
+      },
+    };
+    const server = makeServer({ stores: { audit } });
+    const grant = await issueGrant(server, {
+      permissions: ['tg.order.create'],
+    });
+    down = true;
+    // The protected request must not proceed unrecorded.
+    const handler = server.protect({ permission: 'tg.order.create' }, okHandler);
+    const res = await handler(await signedRequest(grant.token));
+    assert.notEqual(res.status, 200);
+    assert.equal(errorCode(res), Codes.INTERNAL_UNAVAILABLE);
+  });
+});

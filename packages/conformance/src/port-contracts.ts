@@ -8,6 +8,7 @@ import type {
   GrantRequestRecord,
   GrantRequestStore,
   NonceStore,
+  RequestApprovalStore,
   RequestIdempotencyStore,
   RequestRateLimiter,
   SpendingLedger,
@@ -36,6 +37,7 @@ export interface PortContractStores {
   ledger: SpendingLedger;
   rateLimiter: RequestRateLimiter;
   audit: AuditSink;
+  approvals: RequestApprovalStore;
 }
 
 const NOW = () => Math.floor(Date.now() / 1000);
@@ -270,6 +272,52 @@ export function runPortContractSuite(
       assert.equal(await s.rateLimiter.countInWindow('grt_c1', 60, at), 2);
       assert.equal(await s.rateLimiter.countInWindow('grt_c1', 200, at), 3);
       assert.equal(await s.rateLimiter.countInWindow('grt_c2', 200, at), 0);
+    });
+
+    it('request approvals: pending decide is CAS and consume is single-use', async () => {
+      const at = NOW();
+      const s = await makeStores();
+      const pending = await s.approvals.requestApproval({
+        id: 'rpa_c1',
+        grantId: 'grt_c1',
+        operationDigest: 'op-1',
+        amount: usd(9000),
+        now: at,
+        ttlSeconds: 600,
+      });
+      assert.equal(pending.state, 'pending');
+      // Same operation re-requests return the live record.
+      const again = await s.approvals.requestApproval({
+        id: 'rpa_c2',
+        grantId: 'grt_c1',
+        operationDigest: 'op-1',
+        amount: usd(9000),
+        now: at,
+        ttlSeconds: 600,
+      });
+      assert.equal(again.id, 'rpa_c1');
+      // CAS: only one pending decision lands.
+      const approved = await s.approvals.decide('rpa_c1', 'approve', at + 5);
+      assert.equal(approved?.state, 'approved');
+      assert.equal(await s.approvals.decide('rpa_c1', 'deny', at + 6), undefined);
+      // Single-use consume: a second consumer loses the race.
+      const consumed = await s.approvals.consumeApproved('grt_c1', 'op-1', at + 7);
+      assert.equal(consumed?.id, 'rpa_c1');
+      assert.equal(await s.approvals.consumeApproved('grt_c1', 'op-1', at + 7), undefined);
+      // A failed execution restores the decision for retry.
+      await s.approvals.restore('rpa_c1', at + 8);
+      assert.equal((await s.approvals.consumeApproved('grt_c1', 'op-1', at + 8))?.id, 'rpa_c1');
+      // Expired approvals are invisible.
+      const expired = await s.approvals.requestApproval({
+        id: 'rpa_c3',
+        grantId: 'grt_c1',
+        operationDigest: 'op-2',
+        amount: usd(100),
+        now: at,
+        ttlSeconds: 10,
+      });
+      await s.approvals.decide(expired.id, 'approve', at + 1);
+      assert.equal(await s.approvals.peekApproved('grt_c1', 'op-2', at + 11), undefined);
     });
 
     it('audit sink returns unique event ids and keeps append order', async () => {

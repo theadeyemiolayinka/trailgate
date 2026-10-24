@@ -8,6 +8,8 @@ import type {
   GrantRequestStatus,
   GrantRequestStore,
   IssuedGrantRecord,
+  RequestApprovalRecord,
+  RequestApprovalStore,
   RequestIdempotencyStore,
   RequestRateLimiter,
   Reservation,
@@ -568,6 +570,139 @@ export function createAuditSink(db: Db): SqliteAuditSink {
         id: row.id,
         event: { event: row.event, ...JSON.parse(row.payload) } as AuditEvent,
       }));
+    },
+  };
+}
+
+interface ApprovalRow {
+  id: string;
+  grant_id: string;
+  operation_digest: string;
+  amount_minor: number;
+  currency: string;
+  state: 'pending' | 'approved' | 'denied' | 'used';
+  created_at: number;
+  expires_at: number;
+  decided_at: number | null;
+}
+
+function approvalOfRow(row: ApprovalRow): RequestApprovalRecord {
+  return {
+    id: row.id,
+    grantId: row.grant_id,
+    operationDigest: row.operation_digest,
+    amount: { amount: row.amount_minor, currency: row.currency },
+    state: row.state,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    ...(row.decided_at !== null ? { decidedAt: row.decided_at } : {}),
+  };
+}
+
+/**
+ * Per-request approval records behind `approval_threshold` (spec section
+ * 12.4). Transitions are conditional UPDATEs, so a single approval can only
+ * be consumed once even under concurrent requests.
+ */
+export function createApprovalStore(db: Db): RequestApprovalStore {
+  const liveFor = (grantId: string, opDigest: string, now: number) =>
+    db
+      .prepare(
+        `SELECT * FROM tg_request_approvals
+         WHERE grant_id = ? AND operation_digest = ? AND expires_at > ?
+           AND state IN ('pending','approved')
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(grantId, opDigest, now) as unknown as ApprovalRow | undefined;
+  const approvedFor = (grantId: string, opDigest: string, now: number) =>
+    db
+      .prepare(
+        `SELECT * FROM tg_request_approvals
+         WHERE grant_id = ? AND operation_digest = ? AND expires_at > ?
+           AND state = 'approved'
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(grantId, opDigest, now) as unknown as ApprovalRow | undefined;
+  return {
+    requestApproval: async ({ id, grantId, operationDigest, amount, now, ttlSeconds }) => {
+      const existing = liveFor(grantId, operationDigest, now);
+      if (existing !== undefined) {
+        return approvalOfRow(existing);
+      }
+      db.prepare(
+        `INSERT INTO tg_request_approvals
+         (id, grant_id, operation_digest, amount_minor, currency, state, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      ).run(id, grantId, operationDigest, amount.amount, amount.currency, now, now + ttlSeconds);
+      return approvalOfRow(
+        db
+          .prepare('SELECT * FROM tg_request_approvals WHERE id = ?')
+          .get(id) as unknown as ApprovalRow,
+      );
+    },
+    get: async (id) => {
+      const row = db
+        .prepare('SELECT * FROM tg_request_approvals WHERE id = ?')
+        .get(id) as unknown as ApprovalRow | undefined;
+      return row === undefined ? undefined : approvalOfRow(row);
+    },
+    decide: async (id, decision, now) => {
+      const next = decision === 'approve' ? 'approved' : 'denied';
+      const result = db
+        .prepare(
+          `UPDATE tg_request_approvals SET state = ?, decided_at = ?
+           WHERE id = ? AND state = 'pending' AND expires_at > ?`,
+        )
+        .run(next, now, id, now);
+      if (result.changes === 0) {
+        return undefined;
+      }
+      return approvalOfRow(
+        db
+          .prepare('SELECT * FROM tg_request_approvals WHERE id = ?')
+          .get(id) as unknown as ApprovalRow,
+      );
+    },
+    peekApproved: async (grantId, operationDigest, now) => {
+      const row = approvedFor(grantId, operationDigest, now);
+      return row === undefined ? undefined : approvalOfRow(row);
+    },
+    consumeApproved: async (grantId, operationDigest, now) => {
+      // One IMMEDIATE transaction: pick the live approved row and flip it,
+      // so two concurrent consumers cannot both win.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const row = approvedFor(grantId, operationDigest, now);
+        if (row === undefined) {
+          db.exec('ROLLBACK');
+          return undefined;
+        }
+        const result = db
+          .prepare(
+            `UPDATE tg_request_approvals SET state = 'used'
+             WHERE id = ? AND state = 'approved'`,
+          )
+          .run(row.id);
+        if (result.changes === 0) {
+          db.exec('ROLLBACK');
+          return undefined;
+        }
+        db.exec('COMMIT');
+        return approvalOfRow({ ...row, state: 'used' });
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          // Already rolled back.
+        }
+        throw err;
+      }
+    },
+    restore: async (id) => {
+      db.prepare(
+        `UPDATE tg_request_approvals SET state = 'approved'
+         WHERE id = ? AND state = 'used'`,
+      ).run(id);
     },
   };
 }

@@ -27,6 +27,10 @@ export function describeConstraint(constraint: Constraint): string {
       const to = Number(params['not_after']);
       return `usable only between <strong>${esc(formatTime(from))}</strong> and <strong>${esc(formatTime(to))}</strong>`;
     }
+    case 'approval_threshold': {
+      const m = params as unknown as Money;
+      return `charges above <strong>${esc(formatMoneyWithCurrency(m))}</strong> need your approval each time`;
+    }
     default:
       return `<span class="mono">${esc(constraint.type)}</span> <span class="mono-id">${esc(JSON.stringify(params))}</span>`;
   }

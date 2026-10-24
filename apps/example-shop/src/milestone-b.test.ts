@@ -208,13 +208,14 @@ test('grant-request intake: unknown permission and unsupported constraint types 
     'an identifier outside the site vocabulary must not reach consent',
   );
 
-  // Threshold-based re-approval is not a draft 0.1 constraint type. The site
-  // must reject it at intake rather than silently accepting and ignoring it.
+  // Unregistered constraint types (spec section 9.2 lists the six registered
+  // for 0.1) must be rejected at intake rather than silently accepted and
+  // ignored.
   await assert.rejects(
     client.requestGrant(site, {
       permissions: ['tg.catalog.read'],
       resources: [],
-      constraints: [{ type: 'approval_threshold', params: { amount: 100, currency: 'USD' } }],
+      constraints: [{ type: 'disjunctive_or', params: { any: [] } }],
     }),
     (err: unknown) => err instanceof TrailGateError && err.code === Codes.GRANT_SCOPE_REJECTED,
     'unsupported constraint types fail closed at request time',
@@ -530,4 +531,199 @@ test('revoked grant denies immediately even when earlier requests were allowed',
   await app.tg.tg.revokeGrant(grant.jti, { reason: 'user-initiated', actor: 'test' });
   const after = await client.fetchProtected(ISSUER, { method: 'GET', target: '/api/cart' });
   assert.equal(after.error?.code, Codes.GRANT_REVOKED);
+});
+
+test('approval_threshold: a charge above the threshold waits for a single-use human decision', async () => {
+  const app = makeApp();
+  const { client } = await approveAgent(app, {
+    ...AGENT_SCOPE,
+    constraints: [
+      { type: 'approval_threshold', params: { amount: 5_000, currency: 'USD' } },
+      { type: 'cumulative_budget', params: { amount: 40_000, currency: 'USD' } },
+    ],
+  });
+
+  // Below the threshold no human decision is needed.
+  const cheapOrder = await createOrderFromCart(client, 'drk-mug-01', 2); // 4800
+  const cheapPay = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${cheapOrder}/pay`,
+    body: '{}',
+  });
+  assert.equal(cheapPay.status, 200, `below-threshold pay: ${text(cheapPay)}`);
+
+  // Above it: denied with an approval surface, nothing charged.
+  const orderId = await createOrderFromCart(client, 'hm-throw-01', 1); // 8900
+  const blocked = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${orderId}/pay`,
+    body: '{}',
+  });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.error?.code, Codes.CONSTRAINT_APPROVAL_REQUIRED);
+  const detail = blocked.error?.detail as { approval_url?: string; approval_id?: string };
+  assert.ok(detail.approval_url !== undefined, 'denial must carry an approval surface');
+  assert.equal(getWallet(app.db, 'usr_demo').balance.amount, 25_000 - 4_800);
+
+  const approvalUrl = new URL(detail.approval_url as string);
+  const approvalPath = `${approvalUrl.pathname}${approvalUrl.search}`;
+
+  // The decision surface is the site's own auth: anonymous visitors are
+  // pushed to login, not shown the operation.
+  const anonPage = await get(app, approvalPath);
+  assert.equal(anonPage.status, 303);
+  const anonDecide = await post(
+    app,
+    '/tg/request-approval/decide',
+    { 'content-type': 'application/x-www-form-urlencoded' },
+    formBody({ approval_id: detail.approval_id as string, decision: 'approve' }),
+  );
+  assert.equal(anonDecide.status, 303);
+
+  // A different authenticated user cannot decide for the grant subject.
+  await assert.rejects(
+    app.tg.tg.decideRequestApproval(detail.approval_id as string, 'approve', 'usr_bill'),
+    (err: unknown) => err instanceof TrailGateError && err.code === Codes.AUTHORIZATION_DENIED,
+  );
+
+  // The subject logs in, views the decision page, and approves.
+  const { cookie, csrf } = await login(app);
+  const page = await get(app, approvalPath, { cookie });
+  assert.equal(page.status, 200);
+  const decide = await post(
+    app,
+    '/tg/request-approval/decide',
+    { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    formBody({
+      _csrf: csrf,
+      approval_id: detail.approval_id as string,
+      decision: 'approve',
+    }),
+  );
+  assert.equal(decide.status, 303);
+
+  // The approved operation now executes exactly once.
+  const paid = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${orderId}/pay`,
+    body: '{}',
+  });
+  assert.equal(paid.status, 200, `approved pay: ${text(paid)}`);
+  assert.equal(getOrder(app.db, orderId, 'usr_demo')?.status, 'paid');
+  assert.equal(getWallet(app.db, 'usr_demo').balance.amount, 25_000 - 4_800 - 8_900);
+
+  // The approval is single-use and bound to the operation digest: the same
+  // pay request again needs a new human decision, and a different operation
+  // never could have borrowed it.
+  const again = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${orderId}/pay`,
+    body: '{}',
+  });
+  assert.equal(again.error?.code, Codes.CONSTRAINT_APPROVAL_REQUIRED);
+  const otherOrder = await createOrderFromCart(client, 'hm-throw-01', 1);
+  const borrowed = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${otherOrder}/pay`,
+    body: '{}',
+  });
+  assert.equal(borrowed.error?.code, Codes.CONSTRAINT_APPROVAL_REQUIRED);
+
+  // Both transitions are in the audit log.
+  const requested = auditEvents(app, 'request_approval.requested');
+  const decided = auditEvents(app, 'request_approval.decided');
+  assert.ok(requested.length >= 3);
+  assert.equal(decided.length, 1);
+  assert.ok((decided[0]?.payload ?? '').includes('approved'));
+});
+
+test('approval_threshold: denial still requires approval and revocation still wins', async () => {
+  const app = makeApp();
+  const { client, grant } = await approveAgent(app, {
+    ...AGENT_SCOPE,
+    constraints: [{ type: 'approval_threshold', params: { amount: 5_000, currency: 'USD' } }],
+  });
+
+  const orderId = await createOrderFromCart(client, 'hm-throw-01', 1);
+  const blocked = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${orderId}/pay`,
+    body: '{}',
+  });
+  assert.equal(blocked.error?.code, Codes.CONSTRAINT_APPROVAL_REQUIRED);
+  const approvalId = ((blocked.error?.detail ?? {}) as { approval_id?: string })
+    .approval_id as string;
+
+  // A denied approval never executes the operation.
+  await app.tg.tg.decideRequestApproval(approvalId, 'deny', 'usr_demo');
+  const retry = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${orderId}/pay`,
+    body: '{}',
+  });
+  assert.equal(retry.status, 403);
+  assert.equal(retry.error?.code, Codes.CONSTRAINT_APPROVAL_REQUIRED);
+  assert.equal(getWallet(app.db, 'usr_demo').balance.amount, 25_000);
+  assert.equal(getOrder(app.db, orderId, 'usr_demo')?.status, 'awaiting_payment');
+
+  // An approval granted before revocation cannot outlive it: the grant
+  // check runs on every request.
+  const secondApprovalId = ((retry.error?.detail ?? {}) as { approval_id?: string })
+    .approval_id as string;
+  await app.tg.tg.decideRequestApproval(secondApprovalId, 'approve', 'usr_demo');
+  await app.tg.tg.revokeGrant(grant.jti, { reason: 'user-initiated', actor: 'usr_demo' });
+  const revoked = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${orderId}/pay`,
+    body: '{}',
+  });
+  assert.equal(revoked.error?.code, Codes.GRANT_REVOKED);
+  assert.equal(getWallet(app.db, 'usr_demo').balance.amount, 25_000);
+});
+
+test('spend_window: a refund inside the window restores windowed headroom', async () => {
+  const app = makeApp();
+  const { client } = await approveAgent(app, {
+    ...AGENT_SCOPE,
+    constraints: [
+      {
+        type: 'spend_window',
+        params: { amount: 10_000, currency: 'USD', window_seconds: 3600 },
+      },
+    ],
+  });
+
+  const order1 = await createOrderFromCart(client, 'hm-throw-01', 1); // 8900
+  const pay1 = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${order1}/pay`,
+    body: '{}',
+  });
+  assert.equal(pay1.status, 200);
+
+  // Window holds 8900 of 10000; a second 8900 is denied.
+  const order2 = await createOrderFromCart(client, 'hm-throw-01', 1);
+  const blocked = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${order2}/pay`,
+    body: '{}',
+  });
+  assert.equal(blocked.error?.code, Codes.CONSTRAINT_VIOLATED);
+
+  // The refund posts an offsetting entry inside the same window, so the
+  // windowed sum drops and the previously denied charge succeeds.
+  const { cookie, csrf } = await login(app);
+  const refund = await post(
+    app,
+    `/orders/${order1}/refund`,
+    { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    formBody({ _csrf: csrf }),
+  );
+  assert.equal(refund.status, 303);
+  const retry = await client.fetchProtected(ISSUER, {
+    method: 'POST',
+    target: `/api/orders/${order2}/pay`,
+    body: '{}',
+  });
+  assert.equal(retry.status, 200, `pay after in-window refund: ${text(retry)}`);
 });

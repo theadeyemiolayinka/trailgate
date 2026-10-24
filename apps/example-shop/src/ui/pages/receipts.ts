@@ -63,7 +63,6 @@ export function renderReceiptList(ctx: RenderCtx, rows: StoredReceiptRow[]): str
 }
 
 export function renderReceiptDetail(
-  ctx: RenderCtx,
   verdict: ReceiptVerdict,
   rawToken: string,
   meta?: { grant_id: string; method: string; target: string; created_at: number },

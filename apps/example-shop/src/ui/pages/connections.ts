@@ -1,5 +1,4 @@
 import type { AuditEvent, Constraint } from '@trailgate/core';
-import { formatMoney } from '../../domain/money.ts';
 import { esc, formatTime } from '../html.ts';
 import { csrfField, statusBadge } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';

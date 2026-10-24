@@ -2,6 +2,7 @@ import { runPortContractSuite } from '@trailgate/conformance';
 import { openDatabase } from '../db/database.ts';
 import {
   createAgentKeyDirectory,
+  createApprovalStore,
   createAuditSink,
   createGrantRegistry,
   createGrantRequestStore,
@@ -25,5 +26,6 @@ runPortContractSuite('example-shop sqlite stores', () => {
     ledger: createSpendingLedger(db, () => Math.floor(Date.now() / 1000)),
     rateLimiter: createRateLimiter(db),
     audit: createAuditSink(db),
+    approvals: createApprovalStore(db),
   };
 });

@@ -18,9 +18,10 @@ import {
   toErrorResponse,
   verifyProtectedRequest,
 } from '@trailgate/core';
+import { issueRequestApproval } from './approvals.ts';
 import type { ResolvedServerConfig } from './config.ts';
 import { randomId } from './ids.ts';
-import type { Reservation } from './ports.ts';
+import type { RequestApprovalRecord, Reservation } from './ports.ts';
 import { issueReceipt } from './signing.ts';
 import type {
   EnforcementContext,
@@ -51,6 +52,7 @@ const CODE_TO_STAGE: Record<string, number> = {
   [Codes.REQUEST_RESOURCE_DENIED]: 11,
   [Codes.CONSTRAINT_VIOLATED]: 12,
   [Codes.CONSTRAINT_UNKNOWN_TYPE]: 12,
+  [Codes.CONSTRAINT_APPROVAL_REQUIRED]: 12,
   [Codes.AUTHORIZATION_DENIED]: 13,
 };
 
@@ -318,6 +320,7 @@ export function createProtectedHandler(
         idempotency: config.stores.idempotency,
         ledger: config.stores.ledger,
         rateLimiter: config.stores.rateLimiter,
+        approvals: config.stores.approvals,
         clock: config.clock,
         toleranceSeconds: config.toleranceSeconds,
         supportedProtocolVersions: config.supportedProtocolVersions,
@@ -338,6 +341,9 @@ export function createProtectedHandler(
           : {}),
       });
     } catch (err) {
+      if (isTrailGateError(err) && err.code === Codes.CONSTRAINT_APPROVAL_REQUIRED) {
+        return approvalRequiredResponse(err, req, config);
+      }
       return denialResponse(err, req, config);
     }
 
@@ -488,6 +494,37 @@ export function createProtectedHandler(
       }
     }
 
+    // An approval peeked during constraint evaluation must be consumed
+    // atomically before the handler runs: a racing request holding the same
+    // operation must not spend the same human decision.
+    let approval: RequestApprovalRecord | undefined;
+    if (amount !== undefined && needsApproval(grant, amount)) {
+      approval = await config.stores.approvals.consumeApproved(
+        grant.jti,
+        operationDigestOf(req, grant.jti),
+        now,
+      );
+      if (approval === undefined) {
+        if (reservation !== undefined) {
+          try {
+            await releaseReservation(config, reservation, grant.jti, now);
+          } catch {
+            // The denial stands regardless; the reservation TTL reclaims it.
+          }
+        }
+        return approvalRequiredResponse(
+          new TrailGateError(
+            Codes.CONSTRAINT_APPROVAL_REQUIRED,
+            'request amount exceeds approval_threshold and requires human approval',
+            { type: 'approval_threshold', amount, grant_id: grant.jti },
+          ),
+          req,
+          config,
+          { grantId: grant.jti, signatureBase: result.signatureBase },
+        );
+      }
+    }
+
     const context: EnforcementContext = { ...result.context, grant };
     let response: HostResponse;
     try {
@@ -500,6 +537,7 @@ export function createProtectedHandler(
           // The handler's error takes precedence; the reservation TTL reclaims it.
         }
       }
+      await restoreApproval(config, approval);
       return denialResponse(err, req, config, {
         grantId: grant.jti,
         signatureBase: result.signatureBase,
@@ -523,7 +561,10 @@ export function createProtectedHandler(
       } else {
         await releaseReservation(config, reservation, grant.jti, now);
         amounts.released = reservation.amount;
+        await restoreApproval(config, approval);
       }
+    } else if (response.status >= 400) {
+      await restoreApproval(config, approval);
     }
 
     const { token } = await issueReceipt(
@@ -575,6 +616,78 @@ export function createProtectedHandler(
     }
     return finalResponse;
   };
+}
+
+/**
+ * True when the grant's `approval_threshold` constraints require a human
+ * approval for this request amount (spec section 9.2): any matching-currency
+ * threshold below the amount.
+ */
+function needsApproval(grant: GrantPayload, amount: Money): boolean {
+  return grant.tg.constraints.some((c) => {
+    if (c.type !== 'approval_threshold') {
+      return false;
+    }
+    const p = c.params as Partial<Money> | undefined;
+    return (
+      p !== undefined &&
+      p.currency === amount.currency &&
+      typeof p.amount === 'number' &&
+      amount.amount > p.amount
+    );
+  });
+}
+
+/**
+ * Returns a consumed approval to `approved` when the operation it authorized
+ * failed to execute, so the human decision survives a retry (spec 12.4).
+ */
+async function restoreApproval(
+  config: ResolvedServerConfig,
+  approval: RequestApprovalRecord | undefined,
+): Promise<void> {
+  if (approval === undefined) {
+    return;
+  }
+  try {
+    await config.stores.approvals.restore(approval.id, config.clock.now());
+  } catch {
+    // The approval simply stays consumed; a retry issues a fresh request.
+  }
+}
+
+/**
+ * Denial for `tg.constraint.approval_required`: issues (or returns the live)
+ * pending approval record so the agent can hand the user a concrete URL to
+ * decide. When the approval store is unavailable the typed code alone still
+ * answers correctly, just without a URL.
+ */
+async function approvalRequiredResponse(
+  err: TrailGateError,
+  req: HostRequest,
+  config: ResolvedServerConfig,
+  basis: { grantId?: string; signatureBase?: string } = {},
+): Promise<HostResponse> {
+  const detail = { ...(err.detail ?? {}) };
+  const grantId = basis.grantId ?? (detail.grant_id as string | undefined);
+  const amount = detail.amount as Money | undefined;
+  if (grantId !== undefined && amount !== undefined) {
+    try {
+      const issued = await issueRequestApproval(
+        {
+          grantId,
+          operationDigest: operationDigestOf(req, grantId),
+          amount,
+        },
+        config,
+      );
+      detail.approval_id = issued.record.id;
+      detail.approval_url = issued.approvalUrl;
+    } catch {
+      // The typed code remains the decision; the URL is best-effort.
+    }
+  }
+  return denialResponse(new TrailGateError(err.code, err.message, detail), req, config, basis);
 }
 
 async function releaseReservation(

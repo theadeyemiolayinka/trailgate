@@ -155,6 +155,8 @@ export type AuditEventType =
   | 'reservation.consumed'
   | 'reservation.released'
   | 'idempotency.record_failed'
+  | 'request_approval.requested'
+  | 'request_approval.decided'
   | 'key.rotated';
 
 export interface AuditEvent {

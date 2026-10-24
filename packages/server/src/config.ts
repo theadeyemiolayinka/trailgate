@@ -16,6 +16,7 @@ import {
 } from '@trailgate/core';
 import {
   createInMemoryAgentKeyDirectory,
+  createInMemoryApprovalStore,
   createInMemoryAuditSink,
   createInMemoryGrantRegistry,
   createInMemoryGrantRequestStore,
@@ -29,6 +30,7 @@ import type {
   AuditSink,
   GrantRegistry,
   GrantRequestStore,
+  RequestApprovalStore,
   RequestIdempotencyStore,
   RequestRateLimiter,
   ResourceScopePolicy,
@@ -42,6 +44,7 @@ import type { EffectiveScope, RequestedScope } from './types.ts';
 export const DEFAULT_GRANT_REQUEST_TTL_SECONDS = 900;
 export const DEFAULT_GRANT_LIFETIME_SECONDS = 3600;
 export const DEFAULT_RESERVATION_TTL_SECONDS = 300;
+export const DEFAULT_REQUEST_APPROVAL_TTL_SECONDS = 600;
 export const DEFAULT_MAX_BODY_BYTES = 65_536;
 export const DEFAULT_MAX_HEADERS_BYTES = 16_384;
 
@@ -55,6 +58,7 @@ export interface ServerStores {
   ledger: SpendingLedger;
   rateLimiter: RequestRateLimiter;
   audit: AuditSink;
+  approvals: RequestApprovalStore;
 }
 
 /**
@@ -92,6 +96,8 @@ export interface TrailGateServerOptions {
     grantStatus: string;
     grantRevocation: string;
     consent: string;
+    /** Human-facing path for `approval_threshold` per-request decisions. */
+    requestApproval: string;
   }>;
   /** Discovery `capabilities` members to advertise. */
   capabilities?: DiscoveryCapabilities;
@@ -129,6 +135,8 @@ export interface TrailGateServerOptions {
   maxGrantSeconds?: number;
   /** Reservation TTL; recommended 300 (spec section 12). */
   reservationTtlSeconds?: number;
+  /** Per-request approval record TTL; how long a pending or approved decision stays valid. */
+  requestApprovalTtlSeconds?: number;
   /**
    * Maximum protected-request body bytes accepted before denial with
    * `tg.request.too_large` (spec section 17). Default 64 KiB.
@@ -152,6 +160,7 @@ export interface ResolvedServerConfig {
     grantStatus: string;
     grantRevocation: string;
     consent: string;
+    requestApproval: string;
   };
   capabilities: DiscoveryCapabilities;
   discoveryExtensions: Record<string, unknown>;
@@ -173,6 +182,7 @@ export interface ResolvedServerConfig {
   defaultGrantSeconds: number;
   maxGrantSeconds?: number;
   reservationTtlSeconds: number;
+  requestApprovalTtlSeconds: number;
   maxBodyBytes: number;
   maxHeadersBytes: number;
   supportedProtocolVersions: readonly string[];
@@ -184,6 +194,7 @@ const DEFAULT_PATHS = {
   grantStatus: '/tg/grant-status',
   grantRevocation: '/tg/grant-revocation',
   consent: '/tg/consent',
+  requestApproval: '/tg/request-approval',
 };
 
 export function resolveConfig(options: TrailGateServerOptions): ResolvedServerConfig {
@@ -250,6 +261,7 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     ledger: options.stores?.ledger ?? createInMemoryLedger(clock.now),
     rateLimiter: options.stores?.rateLimiter ?? createInMemoryRateLimiter(),
     audit: options.stores?.audit ?? createInMemoryAuditSink(),
+    approvals: options.stores?.approvals ?? createInMemoryApprovalStore(),
   };
 
   const capabilities: DiscoveryCapabilities = { ...(options.capabilities ?? {}) };
@@ -275,6 +287,8 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     grantRequestTtlSeconds: grantRequestTtl,
     defaultGrantSeconds: options.defaultGrantSeconds ?? DEFAULT_GRANT_LIFETIME_SECONDS,
     reservationTtlSeconds: options.reservationTtlSeconds ?? DEFAULT_RESERVATION_TTL_SECONDS,
+    requestApprovalTtlSeconds:
+      options.requestApprovalTtlSeconds ?? DEFAULT_REQUEST_APPROVAL_TTL_SECONDS,
     maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
     maxHeadersBytes: options.maxHeadersBytes ?? DEFAULT_MAX_HEADERS_BYTES,
     supportedProtocolVersions: protocolVersions,

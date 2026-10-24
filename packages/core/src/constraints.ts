@@ -1,5 +1,5 @@
 import { Codes, TrailGateError } from './errors.ts';
-import { callPort, type Ledger, type RateLimiter } from './ports.ts';
+import { callPort, type Ledger, type RateLimiter, type RequestApprovalChecker } from './ports.ts';
 import { SCHEMA_IDS, schemaRegistry } from './schemas.ts';
 import type { Constraint, Money } from './types.ts';
 
@@ -9,14 +9,24 @@ export const REGISTERED_CONSTRAINT_TYPES = [
   'rate_limit',
   'valid_window',
   'spend_window',
+  'approval_threshold',
 ] as const;
 
 export interface ConstraintContext {
   grantId: string;
   now: number;
   requestAmount?: Money;
+  /** Operation binding (method, target, body, grant) for approval lookups. */
+  operationDigest?: string;
+  /**
+   * True when this request replays a stored idempotency outcome. Replays
+   * return the recorded decision rather than executing again, so
+   * `approval_threshold` does not demand a fresh approval for them.
+   */
+  idempotentReplay?: boolean;
   ledger?: Ledger;
   rateLimiter?: RateLimiter;
+  approvals?: RequestApprovalChecker;
 }
 
 function asInteger(value: unknown, name: string): number {
@@ -169,6 +179,62 @@ async function evaluateSpendWindow(
   }
 }
 
+/**
+ * `approval_threshold` (spec section 9.2): amounts above `limit` must carry
+ * a live human approval recorded for this exact operation digest. The
+ * evaluator only peeks; enforcement performs the consuming transition
+ * before the handler runs so a failed execution can release the approval
+ * for retry instead of burning it.
+ */
+async function evaluateApprovalThreshold(
+  params: Record<string, unknown>,
+  ctx: ConstraintContext,
+): Promise<void> {
+  const limit = checkMoneyShape(params);
+  if (ctx.requestAmount === undefined || ctx.idempotentReplay === true) {
+    return;
+  }
+  if (ctx.requestAmount.currency !== limit.currency) {
+    throw new TrailGateError(
+      Codes.CONSTRAINT_VIOLATED,
+      'request amount currency does not match approval_threshold',
+      { type: 'approval_threshold', limit },
+    );
+  }
+  if (ctx.requestAmount.amount <= limit.amount) {
+    return;
+  }
+  if (ctx.approvals === undefined || ctx.operationDigest === undefined) {
+    throw new TrailGateError(
+      Codes.INTERNAL_UNAVAILABLE,
+      'approval_threshold cannot be evaluated without an approval store',
+    );
+  }
+  const approvals = ctx.approvals;
+  const operationDigest = ctx.operationDigest;
+  const approved = await callPort(
+    () =>
+      (approvals as RequestApprovalChecker).peekApproved(
+        ctx.grantId,
+        operationDigest as string,
+        ctx.now,
+      ),
+    'approval store is unavailable',
+  );
+  if (approved === undefined) {
+    throw new TrailGateError(
+      Codes.CONSTRAINT_APPROVAL_REQUIRED,
+      'request amount exceeds approval_threshold and requires human approval',
+      {
+        type: 'approval_threshold',
+        limit,
+        amount: ctx.requestAmount,
+        grant_id: ctx.grantId,
+      },
+    );
+  }
+}
+
 function evaluateValidWindow(params: Record<string, unknown>, ctx: ConstraintContext): void {
   const notBefore = asInteger(params['not_before'], 'not_before');
   const notAfter = asInteger(params['not_after'], 'not_after');
@@ -207,6 +273,9 @@ export async function evaluateConstraints(
         break;
       case 'valid_window':
         evaluateValidWindow(params, ctx);
+        break;
+      case 'approval_threshold':
+        await evaluateApprovalThreshold(params, ctx);
         break;
       default:
         throw new TrailGateError(Codes.CONSTRAINT_UNKNOWN_TYPE, 'unknown constraint type', {

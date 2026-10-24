@@ -57,6 +57,17 @@ export interface RateLimiter {
   countInWindow(grantId: string, windowSeconds: number, now: number): Promise<number>;
 }
 
+/**
+ * Read side of the per-request approval store behind the
+ * `approval_threshold` constraint (spec section 9.2). Returns the live
+ * approved record for `(grantId, operationDigest)`, or undefined when no
+ * human approval exists or it has expired. The consuming transition lives
+ * on the server's full store interface; evaluators only peek.
+ */
+export interface RequestApprovalChecker {
+  peekApproved(grantId: string, operationDigest: string, now: number): Promise<unknown | undefined>;
+}
+
 export interface ResourceOwnerResolver {
   ownerOf(selector: string): Promise<string | undefined>;
 }

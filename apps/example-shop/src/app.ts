@@ -66,11 +66,10 @@ import {
   renderReceiptList,
   type StoredReceiptRow,
 } from './ui/pages/receipts.ts';
+import { renderRequestApproval } from './ui/pages/request-approval.ts';
 import { renderWallet } from './ui/pages/wallet.ts';
-import type { RenderCtx } from './ui/render.ts';
 
 const SESSION_COOKIE = 'shop_session';
-const MAX_BODY_BYTES = 65_536;
 
 export interface ShopApp {
   /** Handles a node:http request; used by both the HTTP and HTTPS listeners. */
@@ -121,7 +120,6 @@ function clearSessionCookie(tls: boolean): string {
 }
 
 function reqSession(
-  ctx: Ctx,
   req: AppRequest,
 ):
   | { session: NonNullable<AppRequest['session']>; user: NonNullable<AppRequest['user']> }
@@ -266,11 +264,9 @@ async function protocolOrApi(
 }
 
 function nextPath(req: AppRequest, form: Record<string, string>): string {
-  const next = form['next'];
-  if (typeof next === 'string' && next.startsWith('/') && !next.startsWith('//')) {
-    return next;
-  }
-  return req.url.searchParams.get('next') ?? '/';
+  const local = (v: string | null | undefined): string | undefined =>
+    typeof v === 'string' && v.startsWith('/') && !v.startsWith('//') ? v : undefined;
+  return local(form['next']) ?? local(req.url.searchParams.get('next')) ?? '/';
 }
 
 function siteIdentity(ctx: Ctx) {
@@ -295,7 +291,7 @@ function buildRoutes(ctx: Ctx): Router {
     ) => Promise<AppResponse> | AppResponse,
   ): ((req: AppRequest) => Promise<AppResponse> | AppResponse) => {
     return (req) => {
-      const auth = reqSession(ctx, req);
+      const auth = reqSession(req);
       if (auth === undefined) {
         return loginRedirect(req.path + (req.url.search === '' ? '' : req.url.search));
       }
@@ -957,17 +953,12 @@ function buildRoutes(ctx: Ctx): Router {
       return render(ctx, req, {
         title: `Receipt ${id}`,
         section: 'account',
-        body: renderReceiptDetail(
-          { ...(req.session !== undefined ? { session: req.session } : {}) },
-          verdict,
-          row.receipt_jws,
-          {
-            grant_id: row.grant_id,
-            method: row.method,
-            target: row.target,
-            created_at: row.created_at,
-          },
-        ),
+        body: renderReceiptDetail(verdict, row.receipt_jws, {
+          grant_id: row.grant_id,
+          method: row.method,
+          target: row.target,
+          created_at: row.created_at,
+        }),
       });
     }),
   );
@@ -985,11 +976,7 @@ function buildRoutes(ctx: Ctx): Router {
       return render(ctx, req, {
         title: 'Verify a receipt',
         section: 'account',
-        body: renderReceiptDetail(
-          { ...(req.session !== undefined ? { session: req.session } : {}) },
-          verdict,
-          token,
-        ),
+        body: renderReceiptDetail(verdict, token),
       });
     }),
   );
@@ -1007,6 +994,9 @@ function buildRoutes(ctx: Ctx): Router {
       for (const grant of grants) {
         rows.push(...ctx.tg.audit.listForGrant(grant.jti));
         rows.push(...ctx.tg.audit.listForRequest(grant.request_id));
+      }
+      for (const row of requestIds) {
+        rows.push(...ctx.tg.audit.listForRequest(row.request_id));
       }
       const seen = new Set<string>();
       const deduped = rows.filter((row) => {
@@ -1083,6 +1073,58 @@ function buildRoutes(ctx: Ctx): Router {
                     siteIdentity(ctx),
                   ),
             flash: { kind: 'error', text: err.message },
+          });
+        }
+        throw err;
+      }
+    }),
+  );
+
+  // ---------- per-request approval (approval_threshold, spec section 12.4) ----------
+
+  router.get(
+    '/tg/request-approval',
+    authed(async (req, user) => {
+      const id = req.query.get('id') ?? '';
+      const record = await ctx.tg.tg.config.stores.approvals.get(id);
+      if (record === undefined) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      const grant = await ctx.tg.tg.config.stores.grants.get(record.grantId);
+      if (grant === undefined || grant.subject !== user.id) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      return render(ctx, req, {
+        title: 'Approve agent charge',
+        section: 'account',
+        body: renderRequestApproval(
+          {
+            ...(req.user !== undefined ? { user: req.user } : {}),
+            ...(req.session !== undefined ? { session: req.session } : {}),
+          },
+          { record, grantJti: record.grantId },
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/tg/request-approval/decide',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const approvalId = form['approval_id'] ?? '';
+      const decision = form['decision'] === 'approve' ? 'approve' : 'deny';
+      try {
+        await ctx.tg.tg.decideRequestApproval(approvalId, decision, user.id);
+        return redirect('/account/connections');
+      } catch (err) {
+        if (isTrailGateError(err)) {
+          return render(ctx, req, {
+            title: 'Approve agent charge',
+            section: 'account',
+            status: err.httpStatus === 404 ? 404 : 400,
+            body: renderError(err.message),
           });
         }
         throw err;

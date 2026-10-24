@@ -1,5 +1,6 @@
 import type { DiscoveryDocument } from '@trailgate/core';
 import { Codes, isTrailGateError, TrailGateError, toErrorResponse } from '@trailgate/core';
+import { decideRequestApproval } from './approvals.ts';
 import type { ResolvedServerConfig, TrailGateServerOptions } from './config.ts';
 import { resolveConfig } from './config.ts';
 import { buildDiscoveryDocument } from './discovery.ts';
@@ -13,6 +14,7 @@ import {
   revokeGrant,
   submitGrantRequest,
 } from './lifecycle.ts';
+import type { RequestApprovalRecord } from './ports.ts';
 import type { SiteSigningKey, SiteSigningKeyInput } from './signing.ts';
 import { siteSigningKey } from './signing.ts';
 import type {
@@ -60,6 +62,15 @@ export interface TrailGateServer {
   handleRevocation(req: HostRequest): Promise<HostResponse>;
   /** Host-initiated revocation from authenticated site surfaces (spec section 13). */
   revokeGrant(jti: string, input: { reason: string; actor: string }): Promise<void>;
+  /**
+   * Records the user's decision on a per-request `approval_threshold`
+   * approval (spec section 12.4). Only the grant subject may decide.
+   */
+  decideRequestApproval(
+    approvalId: string,
+    decision: 'approve' | 'deny',
+    siteUserId?: string,
+  ): Promise<RequestApprovalRecord>;
   /**
    * Rotates the site signing key (spec section 13.4). The new key becomes the
    * signing key and is published first in `signing_keys`; retired keys remain
@@ -141,6 +152,8 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
     handleRevocation: (req) =>
       handleRevocationRequest(req, config).catch((err) => errorResponse(err)),
     revokeGrant: (jti, input) => revokeGrant(jti, input, config),
+    decideRequestApproval: (approvalId, decision, siteUserId) =>
+      decideRequestApproval(approvalId, decision, siteUserId, config),
     rotateSigningKey: async (input) => {
       const previous = config.signingKey;
       const next = siteSigningKey(input);

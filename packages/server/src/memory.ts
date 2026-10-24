@@ -8,6 +8,8 @@ import type {
   GrantRequestRecord,
   GrantRequestStore,
   IssuedGrantRecord,
+  RequestApprovalRecord,
+  RequestApprovalStore,
   RequestIdempotencyStore,
   RequestRateLimiter,
   Reservation,
@@ -281,6 +283,71 @@ export function createInMemoryAuditSink(): InMemoryAuditSink {
       const id = randomId('evt');
       entries.push({ id, event });
       return id;
+    },
+  };
+}
+
+export function createInMemoryApprovalStore(): RequestApprovalStore {
+  const records = new Map<string, RequestApprovalRecord>();
+  const liveFor = (grantId: string, operationDigest: string, now: number) =>
+    [...records.values()].find(
+      (r) =>
+        r.grantId === grantId &&
+        r.operationDigest === operationDigest &&
+        r.expiresAt > now &&
+        (r.state === 'pending' || r.state === 'approved'),
+    );
+  const approvedFor = (grantId: string, operationDigest: string, now: number) =>
+    [...records.values()].find(
+      (r) =>
+        r.grantId === grantId &&
+        r.operationDigest === operationDigest &&
+        r.expiresAt > now &&
+        r.state === 'approved',
+    );
+  return {
+    requestApproval: async ({ id, grantId, operationDigest, amount, now, ttlSeconds }) => {
+      const existing = liveFor(grantId, operationDigest, now);
+      if (existing !== undefined) {
+        return existing;
+      }
+      const record: RequestApprovalRecord = {
+        id,
+        grantId,
+        operationDigest,
+        amount,
+        state: 'pending',
+        createdAt: now,
+        expiresAt: now + ttlSeconds,
+      };
+      records.set(id, record);
+      return record;
+    },
+    get: async (id) => records.get(id),
+    decide: async (id, decision, now) => {
+      const record = records.get(id);
+      if (record === undefined || record.state !== 'pending' || record.expiresAt <= now) {
+        return undefined;
+      }
+      record.state = decision === 'approve' ? 'approved' : 'denied';
+      record.decidedAt = now;
+      return record;
+    },
+    peekApproved: async (grantId, operationDigest, now) =>
+      approvedFor(grantId, operationDigest, now),
+    consumeApproved: async (grantId, operationDigest, now) => {
+      const record = approvedFor(grantId, operationDigest, now);
+      if (record === undefined) {
+        return undefined;
+      }
+      record.state = 'used';
+      return record;
+    },
+    restore: async (id) => {
+      const record = records.get(id);
+      if (record?.state === 'used') {
+        record.state = 'approved';
+      }
     },
   };
 }

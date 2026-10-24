@@ -1,5 +1,6 @@
 import {
   createInMemoryAgentKeyDirectory,
+  createInMemoryApprovalStore,
   createInMemoryAuditSink,
   createInMemoryGrantRegistry,
   createInMemoryGrantRequestStore,
@@ -22,4 +23,5 @@ runPortContractSuite('in-memory reference stores', () => ({
   ledger: createInMemoryLedger(() => Math.floor(Date.now() / 1000)),
   rateLimiter: createInMemoryRateLimiter(),
   audit: createInMemoryAuditSink(),
+  approvals: createInMemoryApprovalStore(),
 }));

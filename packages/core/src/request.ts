@@ -17,7 +17,7 @@ import type {
   SitePolicy,
   VerifiedRequestContext,
 } from './ports.ts';
-import { callPort, systemClock } from './ports.ts';
+import { callPort, type RequestApprovalChecker, systemClock } from './ports.ts';
 import { assertResourceAllowed } from './resources.ts';
 import {
   buildSignatureBase,
@@ -51,6 +51,7 @@ export interface RequestVerificationDeps {
   idempotency?: IdempotencyStore;
   ledger?: Ledger;
   rateLimiter?: RateLimiter;
+  approvals?: RequestApprovalChecker;
   resourceOwners?: ResourceOwnerResolver;
   policy?: SitePolicy;
   toleranceSeconds?: number;
@@ -266,8 +267,11 @@ export async function verifyProtectedRequest(
   await evaluateConstraints(grant.tg.constraints, {
     grantId: grant.jti,
     now: clock.now(),
+    operationDigest,
+    idempotentReplay,
     ...(deps.ledger !== undefined ? { ledger: deps.ledger } : {}),
     ...(deps.rateLimiter !== undefined ? { rateLimiter: deps.rateLimiter } : {}),
+    ...(deps.approvals !== undefined ? { approvals: deps.approvals } : {}),
     ...(requestAmount !== undefined ? { requestAmount } : {}),
   });
 

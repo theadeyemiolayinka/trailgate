@@ -38,6 +38,7 @@ Every error response uses the envelope in `spec/schemas/error.schema.json`:
 | `tg.request.resource_denied` | 403 | Resource not in grant scope or not owned by the grant's context | Stop; cross-context access is never retried |
 | `tg.constraint.violated` | 403 | A grant constraint failed; `detail.type` names it | Stop or reduce the request within the constraint |
 | `tg.constraint.unknown_type` | 403 | Constraint type in the grant is not evaluable | Site bug; grant should never have been issued |
+| `tg.constraint.approval_required` | 403 | `approval_threshold` exceeded; `detail.approval_url` names the site decision surface when issued | Present the URL to the user; after approval, retry the identical request |
 | `tg.authorization.denied` | 403 | Site business rules or user authorization deny the action | Stop; TrailGate does not override site policy |
 | `tg.internal.unavailable` | 503 | A security-critical dependency was unavailable; request denied | Retry with backoff; fail closed on the client too |
 | `tg.internal.error` | 500 | Unclassified server failure | Retry with backoff; report if persistent |

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { type ConstraintContext, evaluateConstraints } from './constraints.ts';
 import { Codes, TrailGateError } from './errors.ts';
-import type { Ledger, RateLimiter } from './ports.ts';
+import type { Ledger, RateLimiter, RequestApprovalChecker } from './ports.ts';
 import type { Constraint } from './types.ts';
 
 const NOW = 1700000000;
@@ -26,6 +26,10 @@ const ledger = (consumed: number, reserved: number): Ledger => ({
 
 const limiter = (count: number): RateLimiter => ({
   countInWindow: async () => count,
+});
+
+const approvals = (approved: boolean): RequestApprovalChecker => ({
+  peekApproved: async () => (approved ? { id: 'rpa_1', state: 'approved' } : undefined),
 });
 
 describe('evaluateConstraints', () => {
@@ -134,6 +138,56 @@ describe('evaluateConstraints', () => {
   it('denies malformed constraint params', async () => {
     const c = { type: 'max_amount', params: { amount: 12.5, currency: 'usd' } } as Constraint;
     await expectCode(Codes.CONSTRAINT_VIOLATED, () => evaluateConstraints([c], BASE));
+  });
+
+  it('enforces approval_threshold: below passes, above requires a live approval', async () => {
+    const c: Constraint = {
+      type: 'approval_threshold',
+      params: { amount: 5000, currency: 'USD' },
+    };
+    const ctx = { ...BASE, operationDigest: 'op-1', approvals: approvals(false) };
+    // Below and at the threshold need no approval.
+    await evaluateConstraints([c], {
+      ...ctx,
+      requestAmount: { amount: 5000, currency: 'USD' },
+    });
+    // Non-monetary requests are unaffected.
+    await evaluateConstraints([c], ctx);
+    // Above the threshold without an approval denies with the dedicated code.
+    await expectCode(Codes.CONSTRAINT_APPROVAL_REQUIRED, () =>
+      evaluateConstraints([c], {
+        ...ctx,
+        requestAmount: { amount: 5001, currency: 'USD' },
+      }),
+    );
+    // An approved record for this exact operation lets the request through.
+    await evaluateConstraints([c], {
+      ...ctx,
+      approvals: approvals(true),
+      requestAmount: { amount: 9000, currency: 'USD' },
+    });
+    // A mismatched currency fails closed rather than comparing raw numbers.
+    await expectCode(Codes.CONSTRAINT_VIOLATED, () =>
+      evaluateConstraints([c], {
+        ...ctx,
+        approvals: approvals(true),
+        requestAmount: { amount: 6000, currency: 'EUR' },
+      }),
+    );
+    // Without an approval store the constraint cannot be evaluated.
+    await expectCode(Codes.INTERNAL_UNAVAILABLE, () =>
+      evaluateConstraints([c], {
+        ...BASE,
+        operationDigest: 'op-1',
+        requestAmount: { amount: 9000, currency: 'USD' },
+      }),
+    );
+    // Idempotent replays return the stored outcome; no new approval is spent.
+    await evaluateConstraints([c], {
+      ...ctx,
+      idempotentReplay: true,
+      requestAmount: { amount: 9000, currency: 'USD' },
+    });
   });
 
   it('combines conjunctively', async () => {
