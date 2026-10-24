@@ -82,6 +82,7 @@ export function createBlogTrailGate(db: Db, config: BlogConfig): BlogTrailGate {
     maxGrantSeconds: 86_400,
     defaultGrantSeconds: 3_600,
     maxConsentLifetimeSeconds: 86_400,
+    pendingActionReviewPath: '/workspace/approvals',
     stores: {
       grantRequests: createGrantRequestStore(db),
       agentKeys: createAgentKeyDirectory(db),

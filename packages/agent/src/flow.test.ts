@@ -42,11 +42,13 @@ describe('inspectSite', () => {
 });
 
 describe('planAccess', () => {
-  it('starts consent for missing scope instead of implying access', async () => {
+  it('reports consent_required without opening a session; requestConsent starts one', async () => {
+    let consentRequested = false;
     const { transport } = fakeTransport((req) => {
       if (req.url.endsWith('/.well-known/trailgate')) {
         return jsonResponse(200, makeDiscovery());
       }
+      consentRequested = true;
       return jsonResponse(201, {
         request_id: 'req_1',
         consent_url: `${ORIGIN}/tg/consent?request_id=req_1`,
@@ -57,9 +59,12 @@ describe('planAccess', () => {
     client.useKey(SoftwareKeyProvider.generate());
     const plan = await planAccess(client, ORIGIN, { permissions: ['tg.order.create'] });
     assert.equal(plan.status, 'consent_required');
+    assert.equal(consentRequested, false);
     if (plan.status === 'consent_required') {
-      assert.ok(plan.session.consentUrl.startsWith(`${ORIGIN}/`));
       assert.equal(plan.reason.status, 'no_grant');
+      const session = await plan.requestConsent();
+      assert.ok(session.consentUrl.startsWith(`${ORIGIN}/`));
+      assert.equal(consentRequested, true);
     }
   });
 
@@ -72,7 +77,7 @@ describe('planAccess', () => {
       planAccess(client, ORIGIN, { permissions: ['tg.order.create'] }),
       // discover itself fails on version; blocked plans only arise for
       // wrong_key/revoked with a stored grant
-      (err) => (err as { code?: string }).code === Codes.DISCOVERY_UNSUPPORTED_VERSION,
+      (err: { code?: string }) => err.code === Codes.DISCOVERY_UNSUPPORTED_VERSION,
     );
   });
 });

@@ -164,6 +164,9 @@ export interface AgentClient {
    * The product flow in one call: discover, check local access, and either
    * return the ready grant or start the consent flow and return the
    * session. Callers then await `awaitApproval` or complete the redirect.
+   * Starting consent is a side effect: call this only when the user has
+   * explicitly asked for new or expanded access. For an advisory plan that
+   * never opens a session, use `planAccess` instead.
    */
   ensureGrant(
     target: string | SiteContext,

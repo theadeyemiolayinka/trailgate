@@ -122,7 +122,7 @@ function guidanceFor(code: string): string | undefined {
     case 'agent.insufficient_permission':
       return 'Access was denied. Do not start a new access request, retry a different way, or work around it. Report the missing permission to the user; only they can decide to grant more access.';
     case 'tg.constraint.approval_required':
-      return 'This action needs the user to approve this specific charge. Share the approval URL and wait for them to decide; do not work around it or split the amount.';
+      return 'This action needs the user to approve this specific charge. Share the approval URL, tell the user it awaits their decision, and continue. Do not work around it or split the amount; do not wait or poll for the decision unless the user asks you to.';
     case 'agent.denied':
       return 'This action was refused. Stop and report back to the user instead of retrying.';
     default:
@@ -345,7 +345,7 @@ export function createTrailGateTools(
             consentUrl: session.consentUrl,
             requestId: session.requestId,
             expiresAt: session.expiresAt,
-            note: 'Share only the consentUrl with the user and wait for their decision; do not expose request internals.',
+            note: 'Share only the consentUrl with the user and continue. Do not expose request internals. Do not poll for the decision unless the user asks you to wait.',
           });
         } catch (err) {
           return fail(err);
@@ -481,9 +481,9 @@ export function createTrailGateTools(
               ? {
                   pending_action: res.pending,
                   pending_summary:
-                    'This was queued for the user to approve. Share the review link and wait for their decision; the action has not run. Poll with trailgate.action_status.',
+                    'This was queued for the user to approve; it has not run. Share the review link and continue. Only check trailgate.action_status if the user asks you to wait for the outcome.',
                   guidance:
-                    'Tell the user the action awaits their approval, share the review link, and stop. Do not retry the same request; it would only queue a duplicate.',
+                    'Tell the user the action awaits their approval, share the review link, and continue. Do not retry the same request; it would only queue a duplicate.',
                 }
               : {}),
             receipt:

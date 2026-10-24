@@ -17,15 +17,18 @@ without hardcoded routes and without silently granting itself access.
 3. **Check access.** `client.checkAccess(url, { permissions })` reports
    `ready`, `no_grant`, `insufficient_permission`, `expired`, `wrong_key`,
    `revoked`, or `unsupported_version`. Each is a different next step;
-   `insufficient_permission` lists the exact `missing` permissions to
-   include in a grant request.
+   `insufficient_permission` lists the exact `missing` permissions. A
+   shortfall means *report what is missing to the user*, never open a
+   consent request on your own initiative.
 4. **Human-in-the-loop binding.** `client.requestGrant` returns a
-   `consent_url`. The agent's job ends at presenting that URL: the user opens
+   `consent_url`. Call it only when the user explicitly asks for new or
+   expanded access; `planAccess` is the advisory path and never opens a
+   session. The agent's job ends at presenting that URL: the user opens
    it, authenticates on the site's own surface, and approves or denies.
-   An agent MUST NOT approve, pre-fill, or auto-confirm consent. Until the
-   user acts, `grant_status` stays pending; after approval,
-   `awaitApproval(requestId)` redeems the grant against the PKCE verifier
-   the client held internally.
+   An agent MUST NOT approve, pre-fill, or auto-confirm consent. Share the
+   URL and continue; wait or poll `grant_status` only when the user asks
+   you to wait. After approval, `awaitApproval(requestId)` redeems the
+   grant against the PKCE verifier the client held internally.
 5. **Act.** `client.fetchProtected(url, { method, target })` signs and sends
    the request. Grant tokens, private keys, and PKCE verifiers never appear
    in any returned shape.
@@ -35,12 +38,14 @@ without hardcoded routes and without silently granting itself access.
    message text. A verified receipt (`response.receipt.verified === true`)
    is durable evidence of the decision.
 7. **Route human decisions.** `tg.constraint.approval_required` means the
-   operation crossed an `approval_threshold`. The denial's
-   `error.detail.approval_url` is the site's decision surface: present it to
-   the user exactly like `consent_url`, then retry the identical request
-   after they approve. An approval is single-use and bound to the exact
-   operation; never retry with altered parameters expecting it to carry
-   over (spec section 12.4).
+   operation crossed an `approval_threshold`, and a queued `pending_action`
+   means the route requires human review (spec sections 12.4-12.5). The
+   `approval_url` or `review_url` is the site's decision surface: tell the
+   user the action is queued, share the link, and continue. Do not block
+   or poll `action_status` unless the user asks you to wait for the
+   outcome. When the user approves, the identical request may be retried;
+   an approval is single-use and bound to the exact operation, so never
+   retry with altered parameters expecting it to carry over.
 
 ## Mapping intent
 

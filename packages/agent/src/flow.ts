@@ -104,17 +104,20 @@ export async function inspectSite(client: AgentClient, target: string): Promise<
 
 /**
  * Steps 3-5 narrated end to end: given a URL and an intended scope, either
- * a usable grant exists, or a consent session starts (or the check explains
- * why action is impossible). `consent_required` means a session was
- * STARTED, never that the user approved; only `awaitApproval` or a
- * validated callback plus `redeemGrant` confirms a decision.
+ * a usable grant exists, or the plan explains that consent is required (or
+ * why action is impossible). `planAccess` is side-effect free: it never
+ * opens a consent session. `consent_required` carries a `requestConsent`
+ * factory the runtime calls only when the user explicitly asks for new or
+ * expanded access; `awaitApproval` or a validated callback plus
+ * `redeemGrant` confirms a decision.
  */
 export type AccessPlan =
   | { status: 'ready'; grant: StoredGrantRecord }
   | {
       status: 'consent_required';
-      session: ConsentSession;
       reason: ReturnType<typeof explainAccessCheck>;
+      /** Starts the consent flow. Call only on an explicit user request. */
+      requestConsent: () => Promise<ConsentSession>;
     }
   | { status: 'blocked'; reason: ReturnType<typeof explainAccessCheck> };
 
@@ -140,8 +143,11 @@ export async function planAccess(
     // Asking for consent again cannot fix these three.
     return { status: 'blocked', reason };
   }
-  const session = await client.requestGrant(target, scope);
-  return { status: 'consent_required', session, reason };
+  return {
+    status: 'consent_required',
+    reason,
+    requestConsent: () => client.requestGrant(target, scope),
+  };
 }
 
 /** Step 7: the faithful outcome report for one protected request. */
