@@ -295,6 +295,11 @@ export function createTrailGateTools(
           permissions: { type: 'array', items: { type: 'string' } },
           resources: { type: 'array', items: { type: 'string' } },
           constraints: { type: 'array', items: { type: 'object' } },
+          requested_seconds: {
+            type: 'integer',
+            description:
+              'How long the access should last, in seconds. The site may shorten it.',
+          },
           user_authorized: {
             type: 'boolean',
             description:
@@ -316,10 +321,25 @@ export function createTrailGateTools(
           return denied;
         }
         try {
+          const requestedSeconds = args.requested_seconds;
+          if (
+            requestedSeconds !== undefined &&
+            (typeof requestedSeconds !== 'number' ||
+              !Number.isInteger(requestedSeconds) ||
+              requestedSeconds < 1)
+          ) {
+            return okError(
+              'agent.denied',
+              'requested_seconds must be a positive integer number of seconds',
+            );
+          }
           const session = await client.requestGrant(requireString(args, 'url'), {
             permissions: stringList(args, 'permissions'),
             resources: stringList(args, 'resources'),
             constraints: (args.constraints as never) ?? [],
+            ...(requestedSeconds !== undefined
+              ? { requestedSeconds: requestedSeconds as number }
+              : {}),
           });
           return ok({
             status: 'pending',

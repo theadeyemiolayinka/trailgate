@@ -42,7 +42,7 @@ import { assertSigningKeysPresent, siteSigningKey } from './signing.ts';
 import type { EffectiveScope, RequestedScope } from './types.ts';
 
 export const DEFAULT_GRANT_REQUEST_TTL_SECONDS = 900;
-export const DEFAULT_GRANT_LIFETIME_SECONDS = 3600;
+export const DEFAULT_GRANT_LIFETIME_SECONDS = 86_400;
 export const DEFAULT_RESERVATION_TTL_SECONDS = 300;
 export const DEFAULT_REQUEST_APPROVAL_TTL_SECONDS = 600;
 export const DEFAULT_MAX_BODY_BYTES = 65_536;

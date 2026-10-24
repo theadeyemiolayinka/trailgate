@@ -94,7 +94,7 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
     signingKeys: [{ privateJwk: loadOrCreateSiteKey(db) }],
     permissions: [...PERMISSIONS],
     maxGrantSeconds: 86_400,
-    defaultGrantSeconds: 3600,
+    defaultGrantSeconds: 86_400,
     stores: {
       grantRequests: createGrantRequestStore(db),
       agentKeys: createAgentKeyDirectory(db),
