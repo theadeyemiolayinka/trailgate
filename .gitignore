@@ -8,3 +8,4 @@ coverage/
 !.env.example
 bundle/
 .trailgate/
+dist-release/

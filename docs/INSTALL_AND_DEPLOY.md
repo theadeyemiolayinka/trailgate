@@ -3,6 +3,8 @@
 TrailGate is an experimental protocol; it is not published to npm. The
 supported distribution is a self-contained single-file bundle: one `.mjs`
 file that runs anywhere Node >= 22.18 exists, with no `npm install`.
+Tagged releases on GitHub carry these files as assets
+(`docs/RELEASING.md` describes how releases are cut).
 
 Two artifacts are produced:
 
