@@ -128,9 +128,20 @@ export function renderConsent(
     : `<form method="post" action="/tg/consent/decide">
         ${csrfField(ctx.session?.csrfToken)}
         <input type="hidden" name="request_id" value="${esc(view.requestId)}">
+        <fieldset class="scope-editor">
+          <legend>Approve exactly what this agent may do (uncheck to refuse)</legend>
+          ${effective.permissions
+            .map(
+              (p) => `<label class="scope-choice">
+              <input type="checkbox" name="perm" value="${esc(p)}" checked>
+              <span>${esc(permissionLabel(p))} <span class="row-sub mono">${esc(p)}</span></span>
+            </label>`,
+            )
+            .join('')}
+        </fieldset>
         <div class="consent-actions">
-          <button class="button" type="submit" name="decision" value="approve">Approve access</button>
-          <button class="button button-secondary" type="submit" name="decision" value="deny">Deny</button>
+          <button class="button" type="submit" name="decision" value="approve">Approve selected</button>
+          <button class="button button-secondary" type="submit" name="decision" value="deny">Deny all</button>
         </div>
       </form>`;
 

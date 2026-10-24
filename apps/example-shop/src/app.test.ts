@@ -250,11 +250,26 @@ test('agent flow: consent, scoped spend, budget denial, revocation', async (t) =
   assert.ok(text(consentPage).includes('tg.wallet.charge'));
   assert.ok(text(consentPage).includes('90.00'));
 
+  const approve = new URLSearchParams({
+    _csrf: csrf,
+    request_id: session.requestId,
+    decision: 'approve',
+  });
+  for (const perm of [
+    'tg.cart.read',
+    'tg.cart.write',
+    'tg.order.create',
+    'tg.order.read',
+    'tg.wallet.read',
+    'tg.wallet.charge',
+  ]) {
+    approve.append('perm', perm);
+  }
   const decide = await post(
     app,
     '/tg/consent/decide',
     { cookie, 'content-type': 'application/x-www-form-urlencoded' },
-    formBody({ _csrf: csrf, request_id: session.requestId, decision: 'approve' }),
+    approve.toString(),
   );
   assert.equal(decide.status, 303);
 

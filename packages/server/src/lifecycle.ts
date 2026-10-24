@@ -140,6 +140,27 @@ export function assertBoundResourcesDeriveFrom(
   }
 }
 
+/** Returns `subset` unchanged when every entry is in `base`; throws otherwise. */
+function assertSubset(
+  subset: readonly string[] | undefined,
+  base: readonly string[],
+  field: string,
+): string[] | undefined {
+  if (subset === undefined) {
+    return undefined;
+  }
+  const allowed = new Set(base);
+  const extra = subset.filter((s) => !allowed.has(s));
+  if (extra.length > 0) {
+    throw new TrailGateError(
+      Codes.REQUEST_MALFORMED,
+      `consent narrowing for ${field} must be a subset of the requested scope`,
+      { rejected: extra },
+    );
+  }
+  return [...subset];
+}
+
 export async function submitGrantRequest(
   body: unknown,
   config: ResolvedServerConfig,
@@ -253,12 +274,22 @@ export async function getConsentView(
  * surface after its existing authentication. `siteUserId` is the host's
  * authenticated user identifier, required for approvals; it is mapped to the
  * grant's `sub` via `config.subjectFor`.
+ *
+ * `narrow` lets the consent surface reduce scope at decision time (for
+ * example the user unchecking permissions): every entry must already be in
+ * the effective requested set, so consent can only ever narrow, never widen.
  */
+export interface ConsentNarrow {
+  permissions?: string[];
+  resources?: string[];
+}
+
 export async function decideConsent(
   requestId: string,
   decision: ConsentDecision,
   siteUserId: string | undefined,
   config: ResolvedServerConfig,
+  narrow?: ConsentNarrow,
 ): Promise<ConsentOutcome> {
   const record = await config.stores.grantRequests.get(requestId);
   if (record === undefined) {
@@ -281,17 +312,24 @@ export async function decideConsent(
     );
   }
   const subject = decision === 'approve' ? config.subjectFor(siteUserId as string) : undefined;
+  const basePermissions = record.effectivePermissions ?? record.body.permissions;
+  const baseResources = record.effectiveResources ?? record.body.resources;
+  const narrowedPermissions = assertSubset(narrow?.permissions, basePermissions, 'permissions');
+  const narrowedResources = assertSubset(narrow?.resources, baseResources, 'resources');
   let boundResources: string[] | undefined;
   if (subject !== undefined && config.bindSubjectResources !== undefined) {
-    const requested = record.effectiveResources ?? record.body.resources;
+    const requested = narrowedResources ?? baseResources;
     boundResources = [...(await config.bindSubjectResources(requested, subject))];
     assertBoundResourcesDeriveFrom(requested, boundResources);
   }
+  const effectiveResources =
+    boundResources ?? (narrowedResources !== undefined ? narrowedResources : undefined);
   const decided = await config.stores.grantRequests.transition(requestId, 'pending', {
     status: decision === 'approve' ? 'approved' : 'denied',
     decidedAt: now,
     ...(subject !== undefined ? { subject } : {}),
-    ...(boundResources !== undefined ? { effectiveResources: boundResources } : {}),
+    ...(narrowedPermissions !== undefined ? { effectivePermissions: narrowedPermissions } : {}),
+    ...(effectiveResources !== undefined ? { effectiveResources } : {}),
   });
   if (decided === undefined) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'grant request already decided');

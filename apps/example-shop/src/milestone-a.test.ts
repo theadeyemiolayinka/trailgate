@@ -92,14 +92,17 @@ async function approveConsent(base: string, requestId: string): Promise<void> {
   const html = await page.text();
   const csrf = html.match(/name="_csrf" value="([^"]+)"/)?.[1];
   assert.ok(csrf !== undefined, 'consent page did not render a CSRF token');
+  const approve = new URLSearchParams({
+    _csrf: csrf,
+    request_id: requestId,
+    decision: 'approve',
+  });
+  approve.append('perm', 'tg.catalog.read');
+  approve.append('perm', 'tg.cart.read');
   const decide = await fetch(`${base}/tg/consent/decide`, {
     method: 'POST',
     headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      _csrf: csrf,
-      request_id: requestId,
-      decision: 'approve',
-    }).toString(),
+    body: approve.toString(),
     redirect: 'manual',
   });
   assert.equal(decide.status, 303, `consent decision failed: ${decide.status}`);

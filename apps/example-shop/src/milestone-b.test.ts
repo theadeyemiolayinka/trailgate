@@ -266,11 +266,17 @@ test('human approval: consent requires site auth and redemption before approval 
 
   // A real login plus the site's CSRF-protected decision completes the loop.
   const { cookie, csrf } = await login(app);
+  const approve = new URLSearchParams({
+    _csrf: csrf,
+    request_id: session.requestId,
+    decision: 'approve',
+  });
+  approve.append('perm', 'tg.catalog.read');
   const decide = await post(
     app,
     '/tg/consent/decide',
     { cookie, 'content-type': 'application/x-www-form-urlencoded' },
-    formBody({ _csrf: csrf, request_id: session.requestId, decision: 'approve' }),
+    approve.toString(),
   );
   assert.equal(decide.status, 303);
   const grant = await client.redeemGrant(session.requestId);

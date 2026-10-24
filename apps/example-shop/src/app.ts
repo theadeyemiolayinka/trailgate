@@ -1,4 +1,4 @@
-import { isTrailGateError, verifyReceipt } from '@trailgate/core';
+import { Codes, isTrailGateError, TrailGateError, verifyReceipt } from '@trailgate/core';
 import type { HostRequest, HostResponse } from '@trailgate/server';
 import { createAgentApi } from './api/routes.ts';
 import type { ShopConfig } from './config.ts';
@@ -37,7 +37,7 @@ import {
   topUp,
   WalletError,
 } from './domain/wallet.ts';
-import { CsrfError, parseCookies, parseForm, requireCsrf } from './http/forms.ts';
+import { CsrfError, parseCookies, parseForm, parseFormValues, requireCsrf } from './http/forms.ts';
 import { html, redirect } from './http/responses.ts';
 import type { AppRequest, AppResponse } from './http/router.ts';
 import { Router } from './http/router.ts';
@@ -1058,11 +1058,21 @@ function buildRoutes(ctx: Ctx): Router {
     '/tg/consent/decide',
     authed(async (req, user) => {
       const form = parseForm(req);
+      const formValues = parseFormValues(req);
       requireCsrf(req, form);
       const requestId = form.request_id ?? '';
       const decision = form.decision === 'approve' ? 'approve' : 'deny';
       try {
-        const outcome = await ctx.tg.tg.decideConsent(requestId, decision, user.id);
+        // The scope editor posts each approved permission as a repeated
+        // `perm` field; unchecked permissions are simply not narrowed in.
+        if (decision === 'approve' && (formValues.perm ?? []).length === 0) {
+          throw new TrailGateError(
+            Codes.REQUEST_MALFORMED,
+            'select at least one permission, or deny the request',
+          );
+        }
+        const narrow = decision === 'approve' ? { permissions: formValues.perm ?? [] } : undefined;
+        const outcome = await ctx.tg.tg.decideConsent(requestId, decision, user.id, narrow);
         if (outcome.redirectTo !== undefined) {
           return { status: 302, headers: { location: outcome.redirectTo } };
         }

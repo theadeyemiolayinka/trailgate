@@ -241,6 +241,37 @@ describe('consent decisions', () => {
     await assertCode(server.decideConsent(requestId, 'approve', 'user_1'), Codes.INTERNAL_ERROR);
   });
 
+  it('narrows effective scope when the user unchecks permissions at consent', async () => {
+    const server = makeServer();
+    const res = await server.handleGrantRequest(
+      post(
+        `${ISSUER}/tg/grant-request`,
+        grantRequestBody({ permissions: ['tg.order.create', 'tg.cart.read'] }),
+      ),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    await server.decideConsent(requestId, 'approve', 'user_1', {
+      permissions: ['tg.cart.read'],
+    });
+    const view = await server.getConsent(requestId);
+    assert.deepEqual(view?.effective.permissions, ['tg.cart.read']);
+    assert.deepEqual(view?.requested.permissions, ['tg.order.create', 'tg.cart.read']);
+  });
+
+  it('rejects a consent narrow that is not a subset of the requested scope', async () => {
+    const server = makeServer();
+    const res = await server.handleGrantRequest(
+      post(`${ISSUER}/tg/grant-request`, grantRequestBody({ permissions: ['tg.order.create'] })),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    await assertCode(
+      server.decideConsent(requestId, 'approve', 'user_1', {
+        permissions: ['tg.order.create', 'tg.admin.all'],
+      }),
+      Codes.REQUEST_MALFORMED,
+    );
+  });
+
   it('refines scope through the configured hook and enforces subset rules', async () => {
     const server = makeServer({
       refineScope: (requested) => ({

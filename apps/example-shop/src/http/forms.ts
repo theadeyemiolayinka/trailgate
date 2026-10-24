@@ -24,6 +24,32 @@ export function parseForm(req: AppRequest): Record<string, string> {
   return out;
 }
 
+/**
+ * Same input as `parseForm` but keeps every repeated field as an array.
+ * Used for checkbox groups such as the consent scope editor.
+ */
+export function parseFormValues(req: AppRequest): Record<string, string[]> {
+  const body = req.body;
+  if (body === undefined) {
+    return {};
+  }
+  const contentType = req.headers['content-type'] ?? '';
+  if (!contentType.includes('application/x-www-form-urlencoded')) {
+    return {};
+  }
+  const params = new URLSearchParams(new TextDecoder().decode(body));
+  const out: Record<string, string[]> = {};
+  for (const [key, value] of params) {
+    const list = out[key];
+    if (list === undefined) {
+      out[key] = [value];
+    } else {
+      list.push(value);
+    }
+  }
+  return out;
+}
+
 /** Parses a JSON body for the agent-facing API. Returns undefined on failure. */
 export function parseJsonBody(req: AppRequest): unknown {
   const body = req.body;

@@ -1399,6 +1399,26 @@ img {
   color: var(--warn);
   font-weight: 600;
 }
+.scope-editor {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+.scope-editor legend {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  padding: 0 var(--space-2);
+}
+.scope-choice {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+}
+.scope-choice + .scope-choice {
+  border-top: 1px solid var(--line);
+}
 .consent-actions {
   display: flex;
   gap: var(--space-3);

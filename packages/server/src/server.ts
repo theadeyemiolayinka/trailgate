@@ -5,6 +5,7 @@ import type { ResolvedServerConfig, TrailGateServerOptions } from './config.ts';
 import { resolveConfig } from './config.ts';
 import { buildDiscoveryDocument, buildDiscoveryResponse } from './discovery.ts';
 import { assertRequestLimits, createProtectedHandler } from './enforcement.ts';
+import type { ConsentNarrow } from './lifecycle.ts';
 import {
   decideConsent,
   getConsentView,
@@ -55,6 +56,7 @@ export interface TrailGateServer {
     requestId: string,
     decision: ConsentDecision,
     siteUserId?: string,
+    narrow?: ConsentNarrow,
   ): Promise<ConsentOutcome>;
   /** `POST <endpoints.grant_redemption>` (spec section 10.4). */
   handleRedemption(req: HostRequest): Promise<HostResponse>;
@@ -122,8 +124,8 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
       }
     },
     getConsent: (requestId) => getConsentView(requestId, config),
-    decideConsent: (requestId, decision, siteUserId) =>
-      decideConsent(requestId, decision, siteUserId, config),
+    decideConsent: (requestId, decision, siteUserId, narrow) =>
+      decideConsent(requestId, decision, siteUserId, config, narrow),
     handleRedemption: async (req) => {
       try {
         assertRequestLimits(req, config);
