@@ -101,7 +101,9 @@ function fakeClient(): FakeClient & Parameters<typeof createTrailGateTools>[0] {
 
 function tool(tools: ToolDefinition[], name: string): ToolDefinition {
   const found = tools.find((t) => t.name === name);
-  assert.ok(found !== undefined, `missing tool ${name}`);
+  if (found === undefined) {
+    throw new Error(`missing tool ${name}`);
+  }
   return found;
 }
 
