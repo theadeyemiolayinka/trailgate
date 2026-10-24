@@ -24,6 +24,7 @@ export function buildDiscoveryDocument(config: ResolvedServerConfig): DiscoveryD
       grant_redemption: endpoint(config.paths.grantRedemption),
       grant_status: endpoint(config.paths.grantStatus),
       grant_revocation: endpoint(config.paths.grantRevocation),
+      action_status: endpoint(config.paths.actionStatus),
     },
     signing_keys: { keys: config.signingKeys.map((key) => key.publicJwk) },
     permissions: [...config.permissions],

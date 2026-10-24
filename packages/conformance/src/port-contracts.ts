@@ -8,6 +8,8 @@ import type {
   GrantRequestRecord,
   GrantRequestStore,
   NonceStore,
+  PendingActionRecord,
+  PendingActionStore,
   RequestApprovalStore,
   RequestIdempotencyStore,
   RequestRateLimiter,
@@ -38,6 +40,7 @@ export interface PortContractStores {
   rateLimiter: RequestRateLimiter;
   audit: AuditSink;
   approvals: RequestApprovalStore;
+  pendingActions: PendingActionStore;
 }
 
 const NOW = () => Math.floor(Date.now() / 1000);
@@ -59,6 +62,29 @@ function makeGrantRequest(requestId: string, at: number): GrantRequestRecord {
       code_challenge: 'challenge',
       code_challenge_method: 'S256',
     },
+  };
+}
+
+function makePendingAction(id: string, at: number): PendingActionRecord {
+  return {
+    id,
+    grantId: 'grt_c1',
+    agentJkt: 'jkt-conf',
+    subject: 'user_1',
+    actionId: 'orders.checkout',
+    permission: 'tg.order.create',
+    scopePermissions: ['tg.order.create'],
+    scopeResources: [],
+    scopeConstraints: [],
+    method: 'POST',
+    url: 'https://shop.example/api/checkout',
+    signatureBase: '"@method": post',
+    requestDigest: 'digest-a',
+    contentDigest: 'sha-256=:x:',
+    summary: 'check out the cart',
+    state: 'pending',
+    createdAt: at,
+    expiresAt: at + 600,
   };
 }
 
@@ -363,6 +389,74 @@ export function runPortContractSuite(
       });
       await s.approvals.decide(expired.id, 'approve', at + 1);
       assert.equal(await s.approvals.peekApproved('grt_c1', 'op-2', at + 11), undefined);
+    });
+
+    it('pending actions: dedupe on identical proposals and single-decision CAS', async () => {
+      const at = NOW();
+      const s = await makeStores();
+      const record = makePendingAction('pa_c1', at);
+      assert.equal((await s.pendingActions.insert(record)).kind, 'inserted');
+      // Byte-identical resubmission returns the live record, not a duplicate.
+      const dup = await s.pendingActions.insert({ ...record, id: 'pa_other' });
+      assert.equal(dup.kind, 'existing');
+      assert.equal(dup.kind === 'existing' ? dup.record.id : '', 'pa_c1');
+      // A different digest is a different proposal.
+      assert.equal(
+        (await s.pendingActions.insert({ ...record, id: 'pa_c2', requestDigest: 'digest-b' })).kind,
+        'inserted',
+      );
+      // CAS decides once; the loser of a second decide gets undefined.
+      const decided = await s.pendingActions.transition('pa_c1', ['pending'], {
+        state: 'approved',
+        decidedAt: at + 5,
+        decidedBy: 'user_1',
+      });
+      assert.equal(decided?.state, 'approved');
+      assert.equal(
+        await s.pendingActions.transition('pa_c1', ['pending'], {
+          state: 'rejected',
+          decidedAt: at + 6,
+          decidedBy: 'user_1',
+        }),
+        undefined,
+      );
+      // Execution claim is single-use across the deciding states.
+      const claimed = await s.pendingActions.transition('pa_c1', ['pending', 'approved'], {
+        state: 'executing',
+      });
+      assert.equal(claimed?.state, 'executing');
+      assert.equal(
+        await s.pendingActions.transition('pa_c1', ['pending', 'approved'], {
+          state: 'executing',
+        }),
+        undefined,
+      );
+    });
+
+    it('pending actions: open listing and grant scoping', async () => {
+      const at = NOW();
+      const s = await makeStores();
+      await s.pendingActions.insert(makePendingAction('pa_c1', at));
+      await s.pendingActions.insert({ ...makePendingAction('pa_c2', at), grantId: 'grt_c2' });
+      await s.pendingActions.insert({
+        ...makePendingAction('pa_c3', at),
+        grantId: 'grt_c3',
+        subject: 'user_2',
+        requestDigest: 'digest-c',
+      });
+      assert.equal(await s.pendingActions.countOpenByGrant('grt_c1'), 1);
+      assert.deepEqual(
+        (await s.pendingActions.listOpenByGrant('grt_c1')).map((r) => r.id),
+        ['pa_c1'],
+      );
+      assert.equal((await s.pendingActions.listBySubject('user_1')).length, 2);
+      // Terminal records drop out of open listings.
+      await s.pendingActions.transition('pa_c1', ['pending'], {
+        state: 'rejected',
+        decidedAt: at + 1,
+      });
+      assert.equal(await s.pendingActions.countOpenByGrant('grt_c1'), 0);
+      assert.equal((await s.pendingActions.get('pa_c1'))?.state, 'rejected');
     });
 
     it('audit sink returns unique event ids and keeps append order', async () => {

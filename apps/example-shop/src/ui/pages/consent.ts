@@ -31,6 +31,12 @@ export function describeConstraint(constraint: Constraint): string {
       const m = params as unknown as Money;
       return `charges above <strong>${esc(formatMoneyWithCurrency(m))}</strong> need your approval each time`;
     }
+    case 'require_approval': {
+      const perms = Array.isArray(params.permissions) ? params.permissions : [];
+      return `actions using ${perms
+        .map((p) => `<span class="mono">${esc(String(p))}</span>`)
+        .join(', ')} need your approval each time`;
+    }
     default:
       return `<span class="mono">${esc(constraint.type)}</span> <span class="mono-id">${esc(JSON.stringify(params))}</span>`;
   }
@@ -80,6 +86,24 @@ function permissionLabel(permission: string): string {
   return PERMISSION_COPY[permission] ?? permission;
 }
 
+export type PermissionMode = 'deny' | 'approval' | 'allow';
+
+/**
+ * The tri-state permission control (spec section 9): each permission can be
+ * denied outright, granted but queued for a human decision on every action,
+ * or allowed to run when the grant's other checks pass. The form posts one
+ * `mode_<permission>` field per permission; the server maps deny to removal
+ * from the grant and approval to a `require_approval` constraint.
+ */
+export function permModeControl(permission: string, label: string, mode: PermissionMode): string {
+  const radio = (value: PermissionMode, text: string): string =>
+    `<label class="mode-choice"><input type="radio" name="mode_${esc(permission)}" value="${value}"${mode === value ? ' checked' : ''}> ${esc(text)}</label>`;
+  return `<div class="scope-choice scope-choice-tristate" data-label="${esc(label)}">
+    <span class="scope-choice-name">${esc(label)} <span class="row-sub mono">${esc(permission)}</span></span>
+    <span class="mode-choices">${radio('allow', 'Allow')}${radio('approval', 'Require approval')}${radio('deny', 'Deny')}</span>
+  </div>`;
+}
+
 /**
  * The consent surface (spec section 10.3). One decision card carries the
  * permission picker, the duration picker, and a live summary that updates as
@@ -119,12 +143,10 @@ export function renderConsent(
     )
     .join('');
 
+  const suggestedApproval = new Set(view.approvalSuggested);
   const permChoices = effective.permissions
-    .map(
-      (p) => `<label class="scope-choice">
-        <input type="checkbox" name="perm" value="${esc(p)}" data-label="${esc(permissionLabel(p))}" checked>
-        <span>${esc(permissionLabel(p))} <span class="row-sub mono">${esc(p)}</span></span>
-      </label>`,
+    .map((p) =>
+      permModeControl(p, permissionLabel(p), suggestedApproval.has(p) ? 'approval' : 'allow'),
     )
     .join('');
 
@@ -139,7 +161,7 @@ export function renderConsent(
         ${csrfField(ctx.session?.csrfToken)}
         <input type="hidden" name="request_id" value="${esc(view.requestId)}">
         <h3>Choose what this agent may do</h3>
-        <p class="muted" style="margin:0 0 var(--space-3)">Uncheck anything you do not want to allow. Approving can only ever grant what is listed here.</p>
+        <p class="muted" style="margin:0 0 var(--space-3)">For each permission choose whether the agent may use it, must ask you first on every action, or is denied. Approving can only ever grant what is listed here.</p>
         <div class="consent-perms">${permChoices}</div>
         <div class="consent-duration">
           <label for="lifetime-seconds">Keep this access for</label>

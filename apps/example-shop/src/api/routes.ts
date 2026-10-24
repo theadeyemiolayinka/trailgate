@@ -9,6 +9,7 @@ import type { Db } from '../db/database.ts';
 import { CartError, getCart, setCartQty } from '../domain/cart.ts';
 import { getProduct, listProducts } from '../domain/catalog.ts';
 import {
+  cancelOrder,
   createOrderFromCart,
   getInvoice,
   getOrder,
@@ -331,6 +332,105 @@ export function createAgentApi(
             throw e;
           }
           return json(200, cartView(db, subject));
+        },
+      ),
+    },
+    {
+      // Approval-gated checkout (spec section 12.5): submitting queues a
+      // pending action that a human approves or rejects on the site.
+      // Nothing is ordered or charged before approval; on approval the
+      // stored proposal replays through this same handler, which refuses
+      // to run if the cart total moved since the review.
+      method: 'POST',
+      pattern: '/api/cart/checkout',
+      handle: tg.protect(
+        {
+          permission: 'tg.wallet.charge',
+          resource: (_req, ctx) =>
+            ctx.subject === undefined ? undefined : walletSelector(ctx.subject),
+          amount: (_req, ctx) =>
+            ctx.subject === undefined ? undefined : getCart(db, ctx.subject).total,
+          approval: 'required',
+          describe: (_req, ctx) => {
+            if (ctx.subject === undefined) {
+              return { summary: 'check out the shopping cart' };
+            }
+            const cart = getCart(db, ctx.subject);
+            return {
+              summary: `Check out the cart: create an order for ${cart.lines.length} line item(s) totalling ${cart.total.amount} ${cart.total.currency} and charge it to the wallet.`,
+              detail: {
+                items: cart.lines.map((line) => ({
+                  sku: line.sku,
+                  name: line.name,
+                  qty: line.qty,
+                  unit_price: line.unitPrice,
+                  line_total: line.lineTotal,
+                })),
+                total: cart.total,
+              },
+            };
+          },
+          action: {
+            id: 'cart.checkout',
+            method: 'POST',
+            path: '/api/cart/checkout',
+            description:
+              'check out the cart: create an order from its contents and pay it from the wallet (requires human approval)',
+            resource: 'wallet:{user}',
+            spend: true,
+          },
+        },
+        async (_req, ctx) => {
+          const subject = requireSubject(ctx);
+          const cart = getCart(db, subject);
+          const proposed = ctx.pendingAction?.amount;
+          if (
+            proposed !== undefined &&
+            (cart.total.amount !== proposed.amount || cart.total.currency !== proposed.currency)
+          ) {
+            return err(
+              409,
+              'shop.cart.changed',
+              'cart total changed since this action was approved; the agent must submit a fresh proposal',
+            );
+          }
+          if (cart.lines.length === 0) {
+            return err(400, 'shop.cart.empty', 'the cart is empty');
+          }
+          if (cart.total.amount > spendingPolicy.maxCharge.amount) {
+            return err(
+              403,
+              'shop.policy.max_charge',
+              `order total exceeds the site maximum charge of ${spendingPolicy.maxCharge.amount} ${spendingPolicy.maxCharge.currency}`,
+            );
+          }
+          try {
+            const order = createOrderFromCart(db, subject, {
+              placedVia: 'agent',
+              grantJti: ctx.grant.jti,
+            });
+            try {
+              payOrder(db, order.id, subject);
+            } catch (payErr) {
+              // A failed charge must not strand a stock-decremented order;
+              // cancelling restores the items to inventory.
+              try {
+                cancelOrder(db, order.id, subject);
+              } catch {
+                // The charge error is the reported failure.
+              }
+              throw payErr;
+            }
+            return json(201, orderView(db, order.id));
+          } catch (e) {
+            if (e instanceof InsufficientFundsError) {
+              return err(402, 'shop.wallet.insufficient', 'wallet balance cannot cover this order');
+            }
+            if (e instanceof OrderError) {
+              return err(400, 'shop.order.invalid', e.message);
+            }
+            throw e;
+          }
         },
       ),
     },

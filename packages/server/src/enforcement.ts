@@ -5,11 +5,15 @@ import type {
   KeyResolver,
   Money,
   RequestVerificationResult,
+  VerifiedRequestContext,
 } from '@trailgate/core';
 import {
+  assertPermissionGranted,
+  assertResourceAllowed,
   buildSignatureBase,
   Codes,
   decodeCompactJws,
+  evaluateConstraints,
   getHeader,
   isTrailGateError,
   operationDigestOf,
@@ -21,7 +25,18 @@ import {
 import { issueRequestApproval } from './approvals.ts';
 import type { ResolvedServerConfig } from './config.ts';
 import { randomId } from './ids.ts';
-import type { RequestApprovalRecord, Reservation } from './ports.ts';
+import {
+  pendingActionDigest,
+  pendingActionRequest,
+  pendingActionView,
+  queuePendingAction,
+} from './pending-actions.ts';
+import type {
+  PendingActionRecord,
+  RequestApprovalRecord,
+  Reservation,
+  StoredOutcome,
+} from './ports.ts';
 import { issueReceipt } from './signing.ts';
 import type {
   EnforcementContext,
@@ -275,6 +290,7 @@ function registerAction(route: RouteProtection, config: ResolvedServerConfig): v
     mutates: route.mutating ?? true,
     ...(advertised.resource !== undefined ? { resource: advertised.resource } : {}),
     ...(advertised.spend !== undefined ? { spend: advertised.spend } : {}),
+    ...(route.approval === 'required' ? { approval_required: true } : {}),
   };
   const existing = config.actions.get(action.id);
   if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(action)) {
@@ -284,6 +300,32 @@ function registerAction(route: RouteProtection, config: ResolvedServerConfig): v
     );
   }
   config.actions.set(action.id, action);
+}
+
+/**
+ * Registers the trusted handler an approved pending action executes through
+ * (spec section 12.5). Every protected route registers so a grant-scoped
+ * `require_approval` constraint can queue operations on any of them, not
+ * only routes declared `approval: 'required'`. The registry is keyed by the
+ * action id when advertised, else by permission. Distinct routes resolving
+ * to the same key would make execution ambiguous; the key is marked
+ * ambiguous and refused at queue and execute time rather than at startup.
+ */
+function registerActionHandler(
+  route: RouteProtection,
+  handler: ProtectedHandler,
+  config: ResolvedServerConfig,
+): void {
+  const id = route.action?.id ?? route.permission;
+  const existing = config.actionHandlers.get(id);
+  if (existing !== undefined) {
+    if (existing.route !== route) {
+      config.actionHandlers.delete(id);
+      config.ambiguousActionKeys.add(id);
+    }
+    return;
+  }
+  config.actionHandlers.set(id, { route, handler });
 }
 
 /**
@@ -302,6 +344,7 @@ export function createProtectedHandler(
   config: ResolvedServerConfig,
 ): (req: HostRequest) => Promise<HostResponse> {
   registerAction(route, config);
+  registerActionHandler(route, handler, config);
   return async (req) => {
     try {
       assertRequestLimits(req, config);
@@ -326,6 +369,9 @@ export function createProtectedHandler(
         toleranceSeconds: config.toleranceSeconds,
         supportedProtocolVersions: config.supportedProtocolVersions,
         permissionVocabulary: config.permissions,
+        // The queued human decision covers approval_threshold; it must not
+        // demand a second approval on top of the pending action itself.
+        skipApprovalThreshold: route.approval === 'required',
         ...(config.resourceOwners !== undefined ? { resourceOwners: config.resourceOwners } : {}),
         ...(config.policy !== undefined ? { policy: config.policy } : {}),
         requiredPermission: route.permission,
@@ -347,32 +393,55 @@ export function createProtectedHandler(
       }
       return denialResponse(err, req, config);
     }
+    return runVerifiedOperation(route, handler, config, req, result);
+  };
+}
 
-    const { grant, requestDigest } = result;
-    const now = config.clock.now();
-    const idempotencyKey = getHeader(req, 'idempotency-key');
+/**
+ * The post-verification half of the protected pipeline, shared by live
+ * requests and by approved pending actions executing later
+ * (`pendingAction` set): audit, dedupe, queueing, reservation, execution,
+ * settlement, and the signed receipt. Pending executions skip dedupe and
+ * queueing (the action record's atomic transitions provide both) and the
+ * `approval_threshold` consume (the recorded human decision covers it).
+ */
+export async function runVerifiedOperation(
+  route: RouteProtection,
+  handler: ProtectedHandler,
+  config: ResolvedServerConfig,
+  req: HostRequest,
+  result: RequestVerificationResult,
+  pendingAction?: PendingActionRecord,
+): Promise<HostResponse> {
+  const { grant, requestDigest } = result;
+  const now = config.clock.now();
+  const idempotencyKey = getHeader(req, 'idempotency-key');
 
-    let auditId: string;
-    try {
-      const nonce = requestNonce(req);
-      auditId = await config.stores.audit.record({
-        event: 'request.authenticated',
-        at: now,
-        grant_id: grant.jti,
-        request_digest: requestDigest,
-        ...(nonce !== undefined ? { nonce } : {}),
-      });
-    } catch {
-      return denialResponse(
-        new TrailGateError(Codes.INTERNAL_UNAVAILABLE, 'audit sink is unavailable'),
-        req,
-        config,
-        { grantId: grant.jti, signatureBase: result.signatureBase },
-      );
-    }
+  let auditId: string;
+  try {
+    const nonce = requestNonce(req);
+    auditId = await config.stores.audit.record({
+      event: 'request.authenticated',
+      at: now,
+      grant_id: grant.jti,
+      request_digest: requestDigest,
+      ...(nonce !== undefined ? { nonce } : {}),
+      ...(pendingAction !== undefined ? { action_request_id: pendingAction.id } : {}),
+    });
+  } catch {
+    return denialResponse(
+      new TrailGateError(Codes.INTERNAL_UNAVAILABLE, 'audit sink is unavailable'),
+      req,
+      config,
+      { grantId: grant.jti, signatureBase: result.signatureBase },
+    );
+  }
 
-    await config.stores.rateLimiter.record(grant.jti, now);
+  await config.stores.rateLimiter.record(grant.jti, now);
 
+  const mutating = route.mutating !== false;
+
+  if (pendingAction === undefined) {
     if (result.idempotentReplay && idempotencyKey !== undefined) {
       const stored = await config.stores.idempotency.lookup(grant.jti, idempotencyKey);
       if (stored?.outcome === undefined) {
@@ -397,7 +466,6 @@ export function createProtectedHandler(
       return replayed;
     }
 
-    const mutating = route.mutating !== false;
     if (mutating && idempotencyKey !== undefined) {
       // Claim-at-lookup (spec section 11.4): the pending record stops a
       // concurrent duplicate from executing twice. A record that appeared
@@ -442,181 +510,464 @@ export function createProtectedHandler(
       }
     }
 
-    const amount = result.requestAmount;
-    let reservation: Reservation | undefined;
-    if (amount !== undefined) {
-      const budgets = result.context.constraints
-        .filter((c) => c.type === 'cumulative_budget')
-        .map((c) => c.params as Money | undefined)
-        .filter((p): p is Money => p !== undefined && p.currency === amount.currency);
-      const spendWindows = result.context.constraints
-        .filter((c) => c.type === 'spend_window')
-        .map((c) => c.params as (Money & { window_seconds?: number }) | undefined)
-        .filter(
-          (p): p is Money & { window_seconds: number } =>
-            p !== undefined &&
-            p.currency === amount.currency &&
-            typeof p.window_seconds === 'number',
-        )
-        .map((p) => ({
-          limit: { amount: p.amount, currency: p.currency },
-          windowSeconds: p.window_seconds,
-        }));
-      try {
-        reservation = await config.stores.ledger.reserve({
-          reservationId: randomId('rsv'),
-          grantId: grant.jti,
-          amount,
-          budgets,
-          spendWindows,
-          now,
-          ttlSeconds: config.reservationTtlSeconds,
-        });
-        await config.stores.audit.record({
-          event: 'reservation.created',
-          at: now,
-          grant_id: grant.jti,
-          reservation_id: reservation.reservationId,
-          amount: amount.amount,
-          currency: amount.currency,
-        });
-      } catch (err) {
-        if (reservation !== undefined) {
-          try {
-            await releaseReservation(config, reservation, grant.jti, now);
-          } catch {
-            // Releasing also failed; the reservation TTL will reclaim it.
-          }
-        }
-        return denialResponse(err, req, config, {
-          grantId: grant.jti,
-          signatureBase: result.signatureBase,
-        });
-      }
+    if (route.approval === 'required' || result.policyDecision === 'require_approval') {
+      return queueActionResponse(route, config, req, result, grant.jti, auditId, {
+        mutating,
+        ...(idempotencyKey !== undefined ? { idempotencyKey } : {}),
+      });
     }
+  }
 
-    // An approval peeked during constraint evaluation must be consumed
-    // atomically before the handler runs: a racing request holding the same
-    // operation must not spend the same human decision.
-    let approval: RequestApprovalRecord | undefined;
-    if (amount !== undefined && needsApproval(grant, amount)) {
-      approval = await config.stores.approvals.consumeApproved(
-        grant.jti,
-        operationDigestOf(req, grant.jti),
-        now,
-      );
-      if (approval === undefined) {
-        if (reservation !== undefined) {
-          try {
-            await releaseReservation(config, reservation, grant.jti, now);
-          } catch {
-            // The denial stands regardless; the reservation TTL reclaims it.
-          }
-        }
-        return approvalRequiredResponse(
-          new TrailGateError(
-            Codes.CONSTRAINT_APPROVAL_REQUIRED,
-            'request amount exceeds approval_threshold and requires human approval',
-            { type: 'approval_threshold', amount, grant_id: grant.jti },
-          ),
-          req,
-          config,
-          { grantId: grant.jti, signatureBase: result.signatureBase },
-        );
-      }
-    }
-
-    const context: EnforcementContext = { ...result.context, grant };
-    let response: HostResponse;
+  const amount = result.requestAmount;
+  let reservation: Reservation | undefined;
+  if (amount !== undefined) {
+    const budgets = result.context.constraints
+      .filter((c) => c.type === 'cumulative_budget')
+      .map((c) => c.params as Money | undefined)
+      .filter((p): p is Money => p !== undefined && p.currency === amount.currency);
+    const spendWindows = result.context.constraints
+      .filter((c) => c.type === 'spend_window')
+      .map((c) => c.params as (Money & { window_seconds?: number }) | undefined)
+      .filter(
+        (p): p is Money & { window_seconds: number } =>
+          p !== undefined && p.currency === amount.currency && typeof p.window_seconds === 'number',
+      )
+      .map((p) => ({
+        limit: { amount: p.amount, currency: p.currency },
+        windowSeconds: p.window_seconds,
+      }));
     try {
-      response = await handler(req, context);
+      reservation = await config.stores.ledger.reserve({
+        reservationId: randomId('rsv'),
+        grantId: grant.jti,
+        amount,
+        budgets,
+        spendWindows,
+        now,
+        ttlSeconds: config.reservationTtlSeconds,
+      });
+      await config.stores.audit.record({
+        event: 'reservation.created',
+        at: now,
+        grant_id: grant.jti,
+        reservation_id: reservation.reservationId,
+        amount: amount.amount,
+        currency: amount.currency,
+      });
     } catch (err) {
       if (reservation !== undefined) {
         try {
           await releaseReservation(config, reservation, grant.jti, now);
         } catch {
-          // The handler's error takes precedence; the reservation TTL reclaims it.
+          // Releasing also failed; the reservation TTL will reclaim it.
         }
       }
-      await restoreApproval(config, approval);
       return denialResponse(err, req, config, {
         grantId: grant.jti,
         signatureBase: result.signatureBase,
-        ...(reservation !== undefined ? { released: reservation.amount } : {}),
       });
     }
+  }
 
-    const amounts: { consumed?: Money; released?: Money } = {};
-    if (reservation !== undefined) {
-      if (response.status < 400) {
-        await config.stores.ledger.consume(reservation.reservationId, now);
-        await config.stores.audit.record({
-          event: 'reservation.consumed',
-          at: now,
-          grant_id: grant.jti,
-          reservation_id: reservation.reservationId,
-          amount: reservation.amount.amount,
-          currency: reservation.amount.currency,
-        });
-        amounts.consumed = reservation.amount;
-      } else {
-        await releaseReservation(config, reservation, grant.jti, now);
-        amounts.released = reservation.amount;
-        await restoreApproval(config, approval);
+  // An approval peeked during constraint evaluation must be consumed
+  // atomically before the handler runs: a racing request holding the same
+  // operation must not spend the same human decision. Pending actions are
+  // exempt: the recorded human decision on the action covers it.
+  let approval: RequestApprovalRecord | undefined;
+  if (pendingAction === undefined && amount !== undefined && needsApproval(grant, amount)) {
+    approval = await config.stores.approvals.consumeApproved(
+      grant.jti,
+      operationDigestOf(req, grant.jti),
+      now,
+    );
+    if (approval === undefined) {
+      if (reservation !== undefined) {
+        try {
+          await releaseReservation(config, reservation, grant.jti, now);
+        } catch {
+          // The denial stands regardless; the reservation TTL reclaims it.
+        }
       }
-    } else if (response.status >= 400) {
+      return approvalRequiredResponse(
+        new TrailGateError(
+          Codes.CONSTRAINT_APPROVAL_REQUIRED,
+          'request amount exceeds approval_threshold and requires human approval',
+          { type: 'approval_threshold', amount, grant_id: grant.jti },
+        ),
+        req,
+        config,
+        { grantId: grant.jti, signatureBase: result.signatureBase },
+      );
+    }
+  }
+
+  const context: EnforcementContext = { ...result.context, grant };
+  if (pendingAction !== undefined) {
+    context.pendingAction = pendingAction;
+  }
+  let response: HostResponse;
+  try {
+    response = await handler(req, context);
+  } catch (err) {
+    if (reservation !== undefined) {
+      try {
+        await releaseReservation(config, reservation, grant.jti, now);
+      } catch {
+        // The handler's error takes precedence; the reservation TTL reclaims it.
+      }
+    }
+    await restoreApproval(config, approval);
+    return denialResponse(err, req, config, {
+      grantId: grant.jti,
+      signatureBase: result.signatureBase,
+      ...(reservation !== undefined ? { released: reservation.amount } : {}),
+    });
+  }
+
+  const amounts: { consumed?: Money; released?: Money } = {};
+  if (reservation !== undefined) {
+    if (response.status < 400) {
+      await config.stores.ledger.consume(reservation.reservationId, now);
+      await config.stores.audit.record({
+        event: 'reservation.consumed',
+        at: now,
+        grant_id: grant.jti,
+        reservation_id: reservation.reservationId,
+        amount: reservation.amount.amount,
+        currency: reservation.amount.currency,
+      });
+      amounts.consumed = reservation.amount;
+    } else {
+      await releaseReservation(config, reservation, grant.jti, now);
+      amounts.released = reservation.amount;
       await restoreApproval(config, approval);
     }
+  } else if (response.status >= 400) {
+    await restoreApproval(config, approval);
+  }
 
+  const { token } = await issueReceipt(
+    {
+      issuer: config.issuer,
+      audience: config.audience,
+      grantId: grant.jti,
+      signatureBase: result.signatureBase,
+      decision: 'allowed',
+      auditId,
+      now,
+      ...(Object.keys(amounts).length > 0 ? { amounts } : {}),
+    },
+    config.signingKey,
+  );
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...(response.headers ?? {}),
+    [RECEIPT_HEADER]: token,
+  };
+  const finalResponse: HostResponse = { ...response, headers };
+
+  if (mutating && idempotencyKey !== undefined) {
+    try {
+      await config.stores.idempotency.record(grant.jti, idempotencyKey, {
+        requestDigest: operationDigestOf(req, grant.jti),
+        outcome: { status: finalResponse.status, headers, body: finalResponse.body },
+      });
+    } catch (recordErr) {
+      // The response is still returned: a failed outcome write weakens
+      // dedupe rather than this request. It MUST be visible operationally
+      // though: the orphaned pending claim would answer in_flight to every
+      // retry until the site's claim TTL reclaims it. Audit is best-effort
+      // for the same reason.
+      try {
+        await config.stores.audit.record({
+          event: 'idempotency.record_failed',
+          at: config.clock.now(),
+          grant_id: grant.jti,
+          detail: {
+            key: idempotencyKey,
+            error: recordErr instanceof Error ? recordErr.message : String(recordErr),
+          },
+        });
+      } catch {
+        // Audit sink failing too cannot change the response.
+      }
+    }
+  }
+  return finalResponse;
+}
+
+/**
+ * Queues a verified request as a pending action and renders the `202`
+ * response (spec section 12.5): a structured `pending_action` body, a
+ * `pending` receipt bound to the original signature base, and (when the
+ * request carried an idempotency key) a stored outcome so byte-identical
+ * retries replay the queued answer instead of queueing again.
+ */
+async function queueActionResponse(
+  route: RouteProtection,
+  config: ResolvedServerConfig,
+  req: HostRequest,
+  result: RequestVerificationResult,
+  grantId: string,
+  auditId: string,
+  dedupe: { mutating: boolean; idempotencyKey?: string },
+): Promise<HostResponse> {
+  let queued: { record: PendingActionRecord; fresh: boolean };
+  try {
+    queued = await queuePendingAction({ route, req, grant: result.grant, result }, config);
+  } catch (err) {
+    return denialResponse(err, req, config, {
+      grantId,
+      signatureBase: result.signatureBase,
+    });
+  }
+  const record = queued.record;
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  try {
     const { token } = await issueReceipt(
       {
         issuer: config.issuer,
         audience: config.audience,
-        grantId: grant.jti,
+        grantId,
         signatureBase: result.signatureBase,
-        decision: 'allowed',
+        decision: 'pending',
+        code: Codes.CONSTRAINT_APPROVAL_REQUIRED,
         auditId,
-        now,
-        ...(Object.keys(amounts).length > 0 ? { amounts } : {}),
+        now: config.clock.now(),
       },
       config.signingKey,
     );
-    const headers: Record<string, string> = {
-      'content-type': 'application/json',
-      ...(response.headers ?? {}),
-      [RECEIPT_HEADER]: token,
-    };
-    const finalResponse: HostResponse = { ...response, headers };
+    headers[RECEIPT_HEADER] = token;
+  } catch {
+    // A receipt that cannot be signed is omitted; the pending body stands.
+  }
+  const response: HostResponse = {
+    status: 202,
+    headers,
+    body: {
+      status: 'pending',
+      pending_action: pendingActionView(record, config, route),
+    },
+  };
+  if (dedupe.mutating && dedupe.idempotencyKey !== undefined) {
+    try {
+      await config.stores.idempotency.record(grantId, dedupe.idempotencyKey, {
+        requestDigest: operationDigestOf(req, grantId),
+        outcome: { status: response.status, headers, body: response.body },
+      });
+    } catch {
+      // A failed outcome write weakens dedupe; the queued action still stands.
+    }
+  }
+  return response;
+}
 
-    if (mutating && idempotencyKey !== undefined) {
-      try {
-        await config.stores.idempotency.record(grant.jti, idempotencyKey, {
-          requestDigest: operationDigestOf(req, grant.jti),
-          outcome: { status: finalResponse.status, headers, body: finalResponse.body },
-        });
-      } catch (recordErr) {
-        // The response is still returned: a failed outcome write weakens
-        // dedupe rather than this request. It MUST be visible operationally
-        // though: the orphaned pending claim would answer in_flight to every
-        // retry until the site's claim TTL reclaims it. Audit is best-effort
-        // for the same reason.
-        try {
-          await config.stores.audit.record({
-            event: 'idempotency.record_failed',
-            at: config.clock.now(),
-            grant_id: grant.jti,
-            detail: {
-              key: idempotencyKey,
-              error: recordErr instanceof Error ? recordErr.message : String(recordErr),
-            },
-          });
-        } catch {
-          // Audit sink failing too cannot change the response.
-        }
+/**
+ * Executes an approved pending action through its registered handler
+ * (spec section 12.5). Transitions are atomic at every step, so repeated
+ * calls are idempotent: terminal records return as-is, and a concurrent
+ * winner of the `approved -> executing` claim owns the run.
+ *
+ * Grant validity is enforced at execution, not just at queue time: a
+ * revoked or expired grant cancels the action without running the handler.
+ * Post-issuance scope, constraints, and the site policy are re-evaluated
+ * against current state before the handler runs.
+ */
+export async function executePendingAction(
+  id: string,
+  config: ResolvedServerConfig,
+): Promise<PendingActionRecord> {
+  const store = config.stores.pendingActions;
+  const record = await store.get(id);
+  if (record === undefined) {
+    throw new TrailGateError(Codes.ACTION_UNKNOWN, 'unknown pending action');
+  }
+  if (record.state !== 'approved') {
+    if (record.state === 'pending' || record.state === 'executing') {
+      throw new TrailGateError(
+        Codes.ACTION_STATE_INVALID,
+        `pending action is '${record.state}' and cannot execute`,
+      );
+    }
+    return record;
+  }
+  const claimed = await store.transition(id, ['approved'], { state: 'executing' });
+  if (claimed === undefined) {
+    const current = await store.get(id);
+    if (current === undefined) {
+      throw new TrailGateError(Codes.ACTION_UNKNOWN, 'unknown pending action');
+    }
+    if (current.state === 'executing') {
+      throw new TrailGateError(Codes.ACTION_STATE_INVALID, 'pending action is already executing');
+    }
+    return current;
+  }
+  const now = config.clock.now();
+  await config.stores.audit.record({
+    event: 'pending_action.executing',
+    at: now,
+    grant_id: claimed.grantId,
+    action_request_id: claimed.id,
+    ...(claimed.subject !== undefined ? { sub: claimed.subject } : {}),
+  });
+
+  const finish = async (
+    state: 'succeeded' | 'failed' | 'cancelled' | 'expired',
+    extra: Partial<PendingActionRecord>,
+  ): Promise<PendingActionRecord> => {
+    const done = await store.transition(claimed.id, ['executing'], { state, ...extra });
+    const final = done ?? { ...claimed, state, ...extra };
+    await config.stores.audit
+      .record({
+        event:
+          state === 'succeeded'
+            ? 'pending_action.succeeded'
+            : state === 'failed'
+              ? 'pending_action.failed'
+              : state === 'expired'
+                ? 'pending_action.expired'
+                : 'pending_action.cancelled',
+        at: config.clock.now(),
+        grant_id: claimed.grantId,
+        action_request_id: claimed.id,
+        ...(extra.reason !== undefined ? { reason: extra.reason } : {}),
+        ...(claimed.subject !== undefined ? { sub: claimed.subject } : {}),
+      })
+      .catch(() => undefined);
+    return final;
+  };
+
+  // Integrity: the stored proposal must still digest to the request the
+  // agent signed for; a store-level mutation makes the action fail closed.
+  if (pendingActionDigest(claimed) !== claimed.requestDigest) {
+    return finish('failed', { reason: 'stored proposal does not match its request digest' });
+  }
+  if (claimed.expiresAt <= now) {
+    return finish('expired', { reason: 'pending action expired before execution' });
+  }
+
+  const grantRecord = await config.stores.grants.get(claimed.grantId);
+  if (grantRecord === undefined) {
+    return finish('cancelled', { reason: 'grant no longer exists' });
+  }
+  if (grantRecord.status === 'revoked') {
+    return finish('cancelled', { reason: 'grant was revoked' });
+  }
+  if (grantRecord.expiresAt <= now) {
+    return finish('cancelled', { reason: 'grant has expired' });
+  }
+
+  const scope = await config.stores.grants.currentScope(claimed.grantId);
+  const effectivePermissions = [...(scope?.permissions ?? claimed.scopePermissions)];
+  const effectiveResources = [...(scope?.resources ?? claimed.scopeResources)];
+  const effectiveConstraints = [...(scope?.constraints ?? claimed.scopeConstraints)];
+
+  const context: VerifiedRequestContext = {
+    grantId: claimed.grantId,
+    permissions: effectivePermissions,
+    resources: effectiveResources,
+    constraints: effectiveConstraints,
+    method: claimed.method,
+    url: claimed.url,
+    requestDigest: claimed.requestDigest,
+    ...(claimed.subject !== undefined ? { subject: claimed.subject } : {}),
+  };
+
+  try {
+    assertPermissionGranted(effectivePermissions, claimed.permission);
+    if (claimed.resource !== undefined) {
+      if (config.resourceOwners === undefined) {
+        throw new TrailGateError(
+          Codes.INTERNAL_UNAVAILABLE,
+          'resource ownership cannot be checked',
+        );
+      }
+      await assertResourceAllowed(
+        effectiveResources,
+        claimed.resource,
+        config.resourceOwners,
+        claimed.subject,
+      );
+    }
+    await evaluateConstraints(effectiveConstraints, {
+      grantId: claimed.grantId,
+      now,
+      operationDigest: claimed.requestDigest,
+      skipApprovalThreshold: true,
+      ...(claimed.amount !== undefined ? { requestAmount: claimed.amount } : {}),
+      ledger: config.stores.ledger,
+      rateLimiter: config.stores.rateLimiter,
+    });
+    if (config.policy !== undefined) {
+      // 'require_approval' is satisfied: the recorded human decision on this
+      // pending action IS the approval. Only an outright denial still stops
+      // execution.
+      const decision = await config.policy.authorize(context);
+      if (decision === 'deny') {
+        throw new TrailGateError(Codes.AUTHORIZATION_DENIED, 'site policy denied the request');
       }
     }
-    return finalResponse;
+  } catch (err) {
+    return finish('failed', {
+      reason: isTrailGateError(err) ? `${err.code}: ${err.message}` : 'execution checks failed',
+    });
+  }
+
+  const entry = config.actionHandlers.get(claimed.actionId);
+  if (entry === undefined || config.ambiguousActionKeys.has(claimed.actionId)) {
+    return finish('failed', { reason: 'action handler is not registered or is ambiguous' });
+  }
+
+  const grant: GrantPayload = {
+    iss: config.issuer,
+    aud: config.audience,
+    iat: grantRecord.issuedAt,
+    exp: grantRecord.expiresAt,
+    jti: grantRecord.jti,
+    cnf: { jkt: claimed.agentJkt },
+    tg: {
+      version: '0.1',
+      permissions: effectivePermissions,
+      resources: effectiveResources,
+      constraints: effectiveConstraints,
+      request_id: grantRecord.requestId,
+    },
+    ...(claimed.subject !== undefined ? { sub: claimed.subject } : {}),
   };
+  const synthetic: RequestVerificationResult = {
+    grant,
+    requestDigest: claimed.requestDigest,
+    operationDigest: claimed.requestDigest,
+    signatureBase: claimed.signatureBase,
+    idempotentReplay: false,
+    context,
+    ...(claimed.amount !== undefined ? { requestAmount: claimed.amount } : {}),
+    ...(claimed.resource !== undefined ? { touchedResource: claimed.resource } : {}),
+  };
+
+  const response = await runVerifiedOperation(
+    entry.route,
+    entry.handler,
+    config,
+    pendingActionRequest(claimed),
+    synthetic,
+    claimed,
+  );
+
+  const executedAt = config.clock.now();
+  const outcome: StoredOutcome = {
+    status: response.status,
+    ...(response.headers !== undefined ? { headers: response.headers } : {}),
+    ...(response.body !== undefined ? { body: response.body } : {}),
+  };
+  if (response.status < 400) {
+    return finish('succeeded', { executedAt, outcome });
+  }
+  return finish('failed', {
+    executedAt,
+    outcome,
+    reason: `handler responded with status ${response.status}`,
+  });
 }
 
 /**

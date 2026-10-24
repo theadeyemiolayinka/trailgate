@@ -20,30 +20,86 @@
         "reservation.consumed",
         "reservation.released",
         "idempotency.record_failed",
-        "key.rotated"
+        "key.rotated",
+        "pending_action.queued",
+        "pending_action.decided",
+        "pending_action.expired",
+        "pending_action.cancelled",
+        "pending_action.executing",
+        "pending_action.succeeded",
+        "pending_action.failed"
       ]
     },
-    "at": { "type": "integer" },
-    "actor": { "type": "string" },
-    "request_id": { "type": "string" },
-    "grant_id": { "type": "string" },
-    "jkt": { "type": "string" },
-    "sub": { "type": "string" },
-    "decision": { "type": "string" },
-    "code": { "type": "string" },
-    "stage": { "type": "string" },
-    "reason": { "type": "string" },
-    "nonce": { "type": "string" },
-    "request_digest": { "type": "string" },
-    "reservation_id": { "type": "string" },
-    "amount": { "type": "integer" },
-    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
-    "permissions": { "type": "array", "items": { "type": "string" } },
-    "constraints": { "type": "array" },
-    "old_jkt": { "type": "string" },
-    "new_jkt": { "type": "string" },
-    "exp": { "type": "integer" },
-    "detail": { "type": "object" }
+    "at": {
+      "type": "integer"
+    },
+    "actor": {
+      "type": "string"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "grant_id": {
+      "type": "string"
+    },
+    "jkt": {
+      "type": "string"
+    },
+    "sub": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "stage": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "nonce": {
+      "type": "string"
+    },
+    "request_digest": {
+      "type": "string"
+    },
+    "reservation_id": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "integer"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "constraints": {
+      "type": "array"
+    },
+    "old_jkt": {
+      "type": "string"
+    },
+    "new_jkt": {
+      "type": "string"
+    },
+    "exp": {
+      "type": "integer"
+    },
+    "detail": {
+      "type": "object"
+    },
+    "action_request_id": {
+      "type": "string"
+    }
   },
   "additionalProperties": false
 }

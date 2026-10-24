@@ -276,6 +276,51 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    id: 9,
+    sql: `
+      -- Pending actions (spec section 12.5): immutable queued proposals
+      -- awaiting a human decision. The stored request never carries
+      -- credentials; execution replays it through the registered handler.
+      CREATE TABLE tg_pending_actions (
+        id TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL,
+        agent_jkt TEXT NOT NULL,
+        subject TEXT,
+        action_id TEXT NOT NULL,
+        permission TEXT NOT NULL,
+        method TEXT NOT NULL,
+        url TEXT NOT NULL,
+        body TEXT,
+        content_type TEXT,
+        signature_base TEXT NOT NULL,
+        request_digest TEXT NOT NULL,
+        content_digest TEXT NOT NULL,
+        resource TEXT,
+        amount_minor INTEGER,
+        currency TEXT,
+        summary TEXT NOT NULL,
+        detail TEXT,
+        scope_permissions TEXT NOT NULL DEFAULT '[]',
+        scope_resources TEXT NOT NULL DEFAULT '[]',
+        scope_constraints TEXT NOT NULL DEFAULT '[]',
+        state TEXT NOT NULL CHECK (state IN
+          ('pending','approved','executing','succeeded','failed','rejected','expired','cancelled')),
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        decided_at INTEGER,
+        decided_by TEXT,
+        reason TEXT,
+        executed_at INTEGER,
+        outcome TEXT
+      );
+      CREATE UNIQUE INDEX idx_tg_pending_open_digest
+        ON tg_pending_actions(grant_id, request_digest)
+        WHERE state IN ('pending','approved','executing');
+      CREATE INDEX idx_tg_pending_subject ON tg_pending_actions(subject, created_at);
+      CREATE INDEX idx_tg_pending_grant ON tg_pending_actions(grant_id, state);
+    `,
+  },
 ];
 
 export function migrate(db: Db): void {

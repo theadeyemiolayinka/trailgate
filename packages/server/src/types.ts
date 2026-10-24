@@ -1,4 +1,5 @@
 import type { Constraint, GrantPayload, Money, VerifiedRequestContext } from '@trailgate/core';
+import type { PendingActionRecord } from './ports.ts';
 
 /**
  * Framework-neutral HTTP request the SDK operates on. The host application
@@ -64,6 +65,13 @@ export interface ConsentView {
    * choices up to this cap.
    */
   lifetimeCapSeconds: number;
+  /**
+   * Permissions covered by actions the site declares approval_required.
+   * The consent surface can use them to default the tri-state picker to
+   * "require approval" for those permissions; the user's choice is what is
+   * persisted, never this hint.
+   */
+  approvalSuggested: string[];
   redirectUri?: string;
 }
 
@@ -127,6 +135,11 @@ export interface ActionAdvertisement {
   resource?: string;
   /** When true, the action may charge money and spend constraints apply. */
   spend?: boolean;
+  /**
+   * Set when submitting the action queues a pending action for human
+   * approval instead of executing immediately (spec section 12.5).
+   */
+  approval_required?: boolean;
 }
 
 /**
@@ -154,11 +167,53 @@ export interface RouteProtection {
   mutating?: boolean;
   /** When set, the route is advertised in discovery `actions`. */
   action?: ActionAdvertisement;
+  /**
+   * `'required'` marks the route approval-gated (spec section 12.5): after
+   * the full verification and constraint pipeline passes, the request is
+   * queued as a pending action and answered `202` instead of executing.
+   * An approved action executes through the same registered handler, never
+   * through stored credentials or arbitrary HTTP replay. Requires the route
+   * to be advertised (or at least identified) via `action.id`.
+   */
+  approval?: 'required';
+  /**
+   * Builds the human-facing description of the proposed effect for the
+   * review page. Runs at queue time; the result is stored on the pending
+   * action record, so what the human reviews is exactly what the agent
+   * submitted. Keep `detail` JSON-safe and free of credentials.
+   */
+  describe?: (
+    req: HostRequest,
+    ctx: SelectorContext,
+  ) => { summary: string; detail?: Record<string, unknown> };
+  /**
+   * Host page path for reviewing this action's proposals; overrides the
+   * site-wide `pendingActionReviewPath` for this route's `review_url`.
+   */
+  reviewPath?: string;
 }
+
+/**
+ * Tri-state authorization outcome for one submitted operation
+ * (spec section 12.5):
+ * - `deny`: the agent may neither execute nor propose the operation.
+ * - `allow`: the operation may execute immediately (all other checks still
+ *   apply).
+ * - `require_approval`: the agent may submit the operation as a proposal,
+ *   but it MUST NOT execute before a human decision.
+ */
+export type AuthorizationDecision = 'deny' | 'allow' | 'require_approval';
 
 /** Request context passed to the host handler after a request verifies. */
 export interface EnforcementContext extends VerifiedRequestContext {
   grant: GrantPayload;
+  /**
+   * Set when the handler runs from an approved pending action (spec
+   * section 12.5): the immutable proposal as queued. Handlers can compare
+   * `amount`, `detail`, or the stored request against live state and fail
+   * the execution when the world moved since the human approved it.
+   */
+  pendingAction?: PendingActionRecord;
 }
 
 /** Host business logic executed after the grant and its constraints pass. */

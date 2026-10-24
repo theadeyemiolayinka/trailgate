@@ -343,17 +343,39 @@ export function createAgentApi(
       ),
     },
     {
+      // Approval-gated (spec section 12.5): publishing is public, so the
+      // agent submits a proposal and the site user decides. The stored
+      // request replays through this handler only after approval.
       method: 'POST',
       pattern: '/api/posts/:id/publish',
       handle: tg.protect(
         {
           permission: 'tg.posts.publish',
           resource: (req) => `post:${param(paramsOf(req, '/api/posts/:id/publish'), 'id')}`,
+          approval: 'required',
+          describe: (req, ctx) => {
+            const id = matchPath('/api/posts/:id/publish', new URL(req.url).pathname)?.id;
+            const post =
+              id !== undefined && ctx.subject !== undefined
+                ? getOwnPost(db, id, ctx.subject)
+                : undefined;
+            return post === undefined
+              ? { summary: `Publish post ${id ?? '(unknown)'}` }
+              : {
+                  summary: `Publish the post "${post.title}" to the public blog`,
+                  detail: {
+                    post_id: post.id,
+                    title: post.title,
+                    slug: post.slug,
+                    status: post.status,
+                  },
+                };
+          },
           action: {
             id: 'posts.publish',
             method: 'POST',
             path: '/api/posts/{id}/publish',
-            description: 'publish an owned draft to the public blog',
+            description: 'publish an owned draft to the public blog (requires human approval)',
             resource: 'post:<id>',
           },
         },

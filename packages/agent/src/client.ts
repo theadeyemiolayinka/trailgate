@@ -32,8 +32,8 @@ import {
   submitGrantRequest,
 } from './grants.ts';
 import type { AgentSigner } from './keys.ts';
-import type { ProtectedRequestOptions, ProtectedResponse } from './request.ts';
-import { executeProtectedRequest } from './request.ts';
+import type { PendingActionView, ProtectedRequestOptions, ProtectedResponse } from './request.ts';
+import { executeProtectedRequest, parsePendingActionView } from './request.ts';
 import type { GrantStore, StoredGrantRecord } from './store.ts';
 import { InMemoryGrantStore, recordFromGrantToken, selectGrant } from './store.ts';
 import type { HttpTransport } from './transport.ts';
@@ -189,6 +189,18 @@ export interface AgentClient {
     grantId: string,
     options?: { reason?: string },
   ): Promise<void>;
+  /**
+   * `GET <endpoints.action_status>/{id}` as a signed request under the
+   * proposing grant (spec section 12.5). Returns the action's current
+   * state; terminal records carry the execution result. `options.grantId`
+   * selects which stored grant signs; defaults to any usable grant for the
+   * site.
+   */
+  actionStatus(
+    target: string | SiteContext,
+    actionId: string,
+    options?: { grantId?: string },
+  ): Promise<PendingActionView>;
 }
 
 export function createAgentClient(options: AgentClientOptions = {}): AgentClient {
@@ -477,6 +489,61 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
         throw errorFromResponse(res.status, res.body);
       }
       await store.remove(grantId);
+    },
+
+    async actionStatus(target, actionId, opts): Promise<PendingActionView> {
+      const context = await site(target);
+      const base = context.document.endpoints.action_status;
+      if (base === undefined) {
+        throw new TrailGateError(
+          Codes.DISCOVERY_INVALID,
+          'site does not advertise an action_status endpoint',
+        );
+      }
+      const grants = await store.list({ issuer: context.origin });
+      let grant: StoredGrantRecord | undefined;
+      if (opts?.grantId !== undefined) {
+        grant = await store.get(opts.grantId);
+      } else {
+        try {
+          grant = selectGrant(grants, { issuer: context.origin, clock });
+        } catch {
+          throw new AgentError('ambiguous', 'multiple stored grants match; pass options.grantId');
+        }
+      }
+      if (grant === undefined) {
+        throw new AgentError('no_grant', 'no usable stored grant for this site');
+      }
+      const signer = signers.get(grant.keyId);
+      if (signer === undefined) {
+        throw new AgentError(
+          'no_key',
+          `grant is bound to key ${grant.keyId}, which is not registered`,
+        );
+      }
+      const res = await executeProtectedRequest(
+        context,
+        grant,
+        signer,
+        { method: 'GET', target: `${base}/${actionId}` },
+        { transport, clock },
+      );
+      if (res.status !== 200) {
+        throw errorFromResponse(res.status, res.body);
+      }
+      const parsed = res.body.length > 0 ? JSON.parse(new TextDecoder().decode(res.body)) : {};
+      const view = parsePendingActionView(
+        typeof parsed === 'object' && parsed !== null
+          ? (parsed as Record<string, unknown>).pending_action
+          : undefined,
+      );
+      if (view === undefined) {
+        throw new TrailGateError(
+          Codes.REQUEST_MALFORMED,
+          'action status response lacks a pending_action member',
+        );
+      }
+      return view;
     },
   };
 }

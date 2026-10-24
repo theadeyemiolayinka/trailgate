@@ -7,6 +7,7 @@ import {
   createInMemoryIdempotencyStore,
   createInMemoryLedger,
   createInMemoryNonceStore,
+  createInMemoryPendingActionStore,
   createInMemoryRateLimiter,
 } from '@trailgate/server';
 import { runPortContractSuite } from './port-contracts.ts';
@@ -24,4 +25,5 @@ runPortContractSuite('in-memory reference stores', () => ({
   rateLimiter: createInMemoryRateLimiter(),
   audit: createInMemoryAuditSink(),
   approvals: createInMemoryApprovalStore(),
+  pendingActions: createInMemoryPendingActionStore(),
 }));

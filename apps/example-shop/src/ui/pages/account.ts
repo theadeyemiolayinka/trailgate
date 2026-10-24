@@ -10,6 +10,7 @@ export function accountNav(section: string): string {
     ['/account/addresses', 'Addresses', 'addresses'],
     ['/account/wallet', 'Wallet', 'wallet'],
     ['/account/connections', 'Agent connections', 'connections'],
+    ['/account/approvals', 'Agent approvals', 'approvals'],
     ['/account/receipts', 'Receipts', 'receipts'],
     ['/account/activity', 'Activity', 'activity'],
   ];

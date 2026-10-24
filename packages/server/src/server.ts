@@ -4,7 +4,12 @@ import { decideRequestApproval } from './approvals.ts';
 import type { ResolvedServerConfig, TrailGateServerOptions } from './config.ts';
 import { resolveConfig } from './config.ts';
 import { buildDiscoveryDocument, buildDiscoveryResponse } from './discovery.ts';
-import { assertRequestLimits, createProtectedHandler } from './enforcement.ts';
+import {
+  assertRequestLimits,
+  createProtectedHandler,
+  executePendingAction,
+  verifyAgentRequest,
+} from './enforcement.ts';
 import type { ConsentNarrow } from './lifecycle.ts';
 import {
   decideConsent,
@@ -16,7 +21,8 @@ import {
   submitGrantRequest,
   updateGrantScope,
 } from './lifecycle.ts';
-import type { IssuedGrantRecord, RequestApprovalRecord } from './ports.ts';
+import { actionStatus, decidePendingAction, pendingActionView } from './pending-actions.ts';
+import type { IssuedGrantRecord, PendingActionRecord, RequestApprovalRecord } from './ports.ts';
 import type { SiteSigningKey, SiteSigningKeyInput } from './signing.ts';
 import { siteSigningKey } from './signing.ts';
 import type {
@@ -96,6 +102,26 @@ export interface TrailGateServer {
     decision: 'approve' | 'deny',
     siteUserId?: string,
   ): Promise<RequestApprovalRecord>;
+  /**
+   * `GET <endpoints.action_status>/{id}` (spec section 12.5): a signed
+   * request under the proposing grant returns the action's current state
+   * and, on terminal states, the recorded outcome.
+   */
+  handleActionStatus(req: HostRequest): Promise<HostResponse>;
+  /**
+   * Records a human decision on a pending action (spec section 12.5). Only
+   * the grant subject may decide. An approve decision executes the stored
+   * proposal synchronously through the registered handler; the returned
+   * record carries the final state.
+   */
+  decidePendingAction(
+    actionId: string,
+    decision: 'approve' | 'reject',
+    siteUserId: string,
+    reason?: string,
+  ): Promise<PendingActionRecord>;
+  /** All pending actions under the site user's grants, newest first. */
+  listPendingActions(siteUserId: string): Promise<PendingActionRecord[]>;
   /**
    * Rotates the site signing key (spec section 13.4). The new key becomes the
    * signing key and is published first in `signing_keys`; retired keys remain
@@ -181,6 +207,46 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
     updateGrantScope: (jti, input) => updateGrantScope(jti, input, config),
     decideRequestApproval: (approvalId, decision, siteUserId) =>
       decideRequestApproval(approvalId, decision, siteUserId, config),
+    handleActionStatus: async (req) => {
+      try {
+        assertRequestLimits(req, config);
+        const prefix = `${config.paths.actionStatus}/`;
+        const id = new URL(req.url).pathname.startsWith(prefix)
+          ? new URL(req.url).pathname.slice(prefix.length)
+          : '';
+        if (id === '') {
+          throw new TrailGateError(Codes.REQUEST_MALFORMED, 'missing pending action id');
+        }
+        const result = await verifyAgentRequest(req, config);
+        const record = await actionStatus(id, result.grant, config);
+        const route = config.actionHandlers.get(record.actionId)?.route;
+        const response = json(200, {
+          status: record.state,
+          pending_action: pendingActionView(record, config, route),
+        });
+        response.headers = { ...response.headers, 'cache-control': 'no-store' };
+        return response;
+      } catch (err) {
+        return errorResponse(err);
+      }
+    },
+    decidePendingAction: async (actionId, decision, siteUserId, reason) => {
+      const record = await decidePendingAction(
+        {
+          id: actionId,
+          decision,
+          siteUserId,
+          ...(reason !== undefined ? { reason } : {}),
+        },
+        config,
+      );
+      if (record.state === 'approved') {
+        return executePendingAction(record.id, config);
+      }
+      return record;
+    },
+    listPendingActions: (siteUserId) =>
+      config.stores.pendingActions.listBySubject(config.subjectFor(siteUserId)),
     rotateSigningKey: async (input) => {
       const previous = config.signingKey;
       const next = siteSigningKey(input);

@@ -23,6 +23,7 @@ import {
   createInMemoryIdempotencyStore,
   createInMemoryLedger,
   createInMemoryNonceStore,
+  createInMemoryPendingActionStore,
   createInMemoryRateLimiter,
 } from './memory.ts';
 import type {
@@ -30,6 +31,7 @@ import type {
   AuditSink,
   GrantRegistry,
   GrantRequestStore,
+  PendingActionStore,
   RequestApprovalStore,
   RequestIdempotencyStore,
   RequestRateLimiter,
@@ -39,7 +41,7 @@ import type {
 } from './ports.ts';
 import type { SiteSigningKey, SiteSigningKeyInput } from './signing.ts';
 import { assertSigningKeysPresent, siteSigningKey } from './signing.ts';
-import type { EffectiveScope, RequestedScope } from './types.ts';
+import type { EffectiveScope, ProtectedHandler, RequestedScope, RouteProtection } from './types.ts';
 
 export const DEFAULT_GRANT_REQUEST_TTL_SECONDS = 900;
 export const DEFAULT_GRANT_LIFETIME_SECONDS = 86_400;
@@ -59,6 +61,8 @@ export interface ServerStores {
   rateLimiter: RequestRateLimiter;
   audit: AuditSink;
   approvals: RequestApprovalStore;
+  /** Pending-action persistence (spec section 12.5). */
+  pendingActions: PendingActionStore;
 }
 
 /**
@@ -106,6 +110,8 @@ export interface TrailGateServerOptions {
     consent: string;
     /** Human-facing path for `approval_threshold` per-request decisions. */
     requestApproval: string;
+    /** Pending-action status endpoint (spec section 12.5). */
+    actionStatus: string;
   }>;
   /** Discovery `capabilities` members to advertise. */
   capabilities?: DiscoveryCapabilities;
@@ -184,6 +190,23 @@ export interface TrailGateServerOptions {
    * Default 10.
    */
   maxGrantRequestsPerMinute?: number;
+  /**
+   * Pending-action lifetime in seconds; how long a queued proposal stays
+   * decidable (spec section 12.5). Default 86400 (one day).
+   */
+  pendingActionTtlSeconds?: number;
+  /**
+   * Maximum open pending actions (pending, approved, executing) under one
+   * grant; excess submissions are denied with `tg.request.rate_limited`.
+   * Default 25.
+   */
+  maxPendingActionsPerGrant?: number;
+  /**
+   * Human-facing review path for pending actions, used to build the
+   * `review_url` in queued responses: `{issuer}{pendingActionReviewPath}/{id}`.
+   * Default `/account/approvals`.
+   */
+  pendingActionReviewPath?: string;
 }
 
 export interface ResolvedServerConfig {
@@ -201,6 +224,7 @@ export interface ResolvedServerConfig {
     grantRevocation: string;
     consent: string;
     requestApproval: string;
+    actionStatus: string;
   };
   capabilities: DiscoveryCapabilities;
   discoveryExtensions: Record<string, unknown>;
@@ -209,6 +233,19 @@ export interface ResolvedServerConfig {
    * routes are wrapped with `protect()`; published in discovery `actions`.
    */
   actions: Map<string, DiscoveryAction>;
+  /**
+   * Registered protected handlers by action key (action id, else
+   * permission), populated by `protect()` as routes wrap. Approved pending
+   * actions replay through these trusted handlers, never through a stored
+   * HTTP request (spec section 12.5).
+   */
+  actionHandlers: Map<string, { route: RouteProtection; handler: ProtectedHandler }>;
+  /**
+   * Action keys claimed by more than one route. A grant-scoped approval
+   * cannot name a single executor for these keys, so queueing and execution
+   * for them fail closed instead of guessing.
+   */
+  ambiguousActionKeys: Set<string>;
   stores: ServerStores;
   subjectFor: (siteUserId: string) => string;
   policy?: SitePolicy;
@@ -232,6 +269,9 @@ export interface ResolvedServerConfig {
   maxHeadersBytes: number;
   maxPendingRequestsPerAgent: number;
   maxGrantRequestsPerMinute: number;
+  pendingActionTtlSeconds: number;
+  maxPendingActionsPerGrant: number;
+  pendingActionReviewPath: string;
   supportedProtocolVersions: readonly string[];
 }
 
@@ -242,6 +282,7 @@ const DEFAULT_PATHS = {
   grantRevocation: '/tg/grant-revocation',
   consent: '/tg/consent',
   requestApproval: '/tg/request-approval',
+  actionStatus: '/tg/action-status',
 };
 
 export function resolveConfig(options: TrailGateServerOptions): ResolvedServerConfig {
@@ -309,6 +350,7 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     rateLimiter: options.stores?.rateLimiter ?? createInMemoryRateLimiter(),
     audit: options.stores?.audit ?? createInMemoryAuditSink(),
     approvals: options.stores?.approvals ?? createInMemoryApprovalStore(),
+    pendingActions: options.stores?.pendingActions ?? createInMemoryPendingActionStore(),
   };
 
   const capabilities: DiscoveryCapabilities = { ...(options.capabilities ?? {}) };
@@ -327,6 +369,8 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     capabilities,
     discoveryExtensions: options.discoveryExtensions ?? {},
     actions: new Map(),
+    actionHandlers: new Map(),
+    ambiguousActionKeys: new Set(),
     stores,
     subjectFor: options.subjectFor ?? ((siteUserId) => siteUserId),
     clock,
@@ -345,6 +389,9 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     maxHeadersBytes: options.maxHeadersBytes ?? DEFAULT_MAX_HEADERS_BYTES,
     maxPendingRequestsPerAgent: options.maxPendingRequestsPerAgent ?? 5,
     maxGrantRequestsPerMinute: options.maxGrantRequestsPerMinute ?? 10,
+    pendingActionTtlSeconds: options.pendingActionTtlSeconds ?? 86_400,
+    maxPendingActionsPerGrant: options.maxPendingActionsPerGrant ?? 25,
+    pendingActionReviewPath: options.pendingActionReviewPath ?? '/account/approvals',
     supportedProtocolVersions: protocolVersions,
     ...(options.policy !== undefined ? { policy: options.policy } : {}),
     ...(options.resourceOwners !== undefined ? { resourceOwners: options.resourceOwners } : {}),

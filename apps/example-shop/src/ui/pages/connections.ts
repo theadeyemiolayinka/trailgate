@@ -1,11 +1,12 @@
 import type { AuditEvent, Constraint, Money } from '@trailgate/core';
+import { requireApprovalPermissions } from '@trailgate/core';
 import { formatMoneyWithCurrency } from '../../domain/money.ts';
 import { PERMISSIONS } from '../../tg/vocabulary.ts';
 import { esc, formatTime } from '../html.ts';
 import { csrfField, emptyState, pageHead, statusBadge } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';
 import { accountNav } from './account.ts';
-import { describeConstraint } from './consent.ts';
+import { describeConstraint, type PermissionMode, permModeControl } from './consent.ts';
 
 export interface GrantRequestView {
   requestId: string;
@@ -50,6 +51,9 @@ function permEditor(ctx: RenderCtx, grant: IssuedGrantView, caps: SiteCaps): str
     return '';
   }
   const effective = new Set(grant.permissions);
+  const approvalSet = new Set(grant.constraints.flatMap((c) => requireApprovalPermissions(c)));
+  const modeOf = (p: string): PermissionMode =>
+    !effective.has(p) ? 'deny' : approvalSet.has(p) ? 'approval' : 'allow';
   const moneyParam = (type: string): Money | undefined => {
     const found = grant.constraints.find((c) => c.type === type);
     return found?.params as Money | undefined;
@@ -64,11 +68,8 @@ function permEditor(ctx: RenderCtx, grant: IssuedGrantView, caps: SiteCaps): str
               ${csrfField(ctx.session?.csrfToken)}
               <div class="scope-group">
                 <h4 class="scope-group-title">Permissions</h4>
-                <div class="consent-perms">${PERMISSIONS.map(
-                  (p) => `<label class="scope-choice">
-                      <input type="checkbox" name="perm" value="${esc(p)}"${effective.has(p) ? ' checked' : ''}>
-                      <span>${esc(PERM_COPY[p] ?? p)} <span class="row-sub mono">${esc(p)}</span></span>
-                    </label>`,
+                <div class="consent-perms">${PERMISSIONS.map((p) =>
+                  permModeControl(p, PERM_COPY[p] ?? p, modeOf(p)),
                 ).join('')}</div>
               </div>
               <div class="scope-group">

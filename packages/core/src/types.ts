@@ -37,6 +37,8 @@ export interface DiscoveryEndpoints {
   grant_redemption: string;
   grant_status: string;
   grant_revocation: string;
+  /** Pending-action status endpoint (spec section 12.5). Optional. */
+  action_status?: string;
 }
 
 export interface DiscoveryCapabilities {
@@ -72,6 +74,12 @@ export interface DiscoveryAction {
   resource?: string;
   /** When true, the action may charge money and spend constraints apply. */
   spend?: boolean;
+  /**
+   * When true, submitting this action queues a pending action for human
+   * approval instead of executing immediately (spec section 12.5). The
+   * response is a `202` pending-action record, not the operation result.
+   */
+  approval_required?: boolean;
 }
 
 export interface DiscoveryDocument {
@@ -135,7 +143,13 @@ export interface ReceiptAmounts {
 export interface ReceiptTgClaims {
   grant_id: string;
   request_digest: string;
-  decision: 'allowed' | 'denied';
+  /**
+   * `allowed`: the operation executed. `denied`: it was refused. `pending`:
+   * it was queued as a pending action awaiting a human decision
+   * (spec section 12.5); the `code` member then carries
+   * `tg.constraint.approval_required`.
+   */
+  decision: 'allowed' | 'denied' | 'pending';
   code?: string;
   amounts?: ReceiptAmounts;
   audit_id: string;
@@ -164,6 +178,13 @@ export type AuditEventType =
   | 'idempotency.record_failed'
   | 'request_approval.requested'
   | 'request_approval.decided'
+  | 'pending_action.queued'
+  | 'pending_action.decided'
+  | 'pending_action.expired'
+  | 'pending_action.cancelled'
+  | 'pending_action.executing'
+  | 'pending_action.succeeded'
+  | 'pending_action.failed'
   | 'key.rotated';
 
 export interface AuditEvent {
@@ -189,4 +210,6 @@ export interface AuditEvent {
   new_jkt?: string;
   exp?: number;
   detail?: Record<string, unknown>;
+  /** Pending action the event concerns (spec section 12.5). */
+  action_request_id?: string;
 }

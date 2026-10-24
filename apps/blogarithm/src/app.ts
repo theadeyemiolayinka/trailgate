@@ -1,3 +1,4 @@
+import { isTrailGateError } from '@trailgate/core';
 import type { HostRequest, HostResponse } from '@trailgate/server';
 import { createAgentApi } from './api/routes.ts';
 import type { BlogConfig } from './config.ts';
@@ -36,14 +37,24 @@ import {
   updateProfile,
   ValidationError,
 } from './domain/users.ts';
-import { CsrfError, parseCookies, parseForm, parseFormValues, requireCsrf } from './http/forms.ts';
+import {
+  CsrfError,
+  parseCookies,
+  parseForm,
+  parseFormValues,
+  parsePermissionModes,
+  requireCsrf,
+} from './http/forms.ts';
 import { html, redirect } from './http/responses.ts';
 import type { AppRequest, AppResponse } from './http/router.ts';
 import { Router } from './http/router.ts';
 import { type BlogTrailGate, createBlogTrailGate } from './tg/server.ts';
+import { PERMISSIONS } from './tg/vocabulary.ts';
 import { page } from './ui/layout.ts';
 import {
   renderAccessPage,
+  renderApprovalDetail,
+  renderApprovalsPage,
   renderArticle,
   renderAuth,
   renderCommentsPage,
@@ -86,7 +97,8 @@ function isProtectedPath(path: string): boolean {
     path === '/tg/grant-request' ||
     path === '/tg/grant-redemption' ||
     path === '/tg/grant-revocation' ||
-    path === '/tg/grant-status'
+    path === '/tg/grant-status' ||
+    path.startsWith('/tg/action-status/')
   );
 }
 
@@ -127,6 +139,20 @@ function hostToAppRequest(
   };
 }
 
+function navSection(path: string): string | undefined {
+  if (path === '/') {
+    return 'articles';
+  }
+  if (path === '/search') {
+    return 'search';
+  }
+  if (!path.startsWith('/workspace')) {
+    return undefined;
+  }
+  const segment = path.split('/')[2] ?? '';
+  return segment === '' ? 'overview' : segment;
+}
+
 function render(
   ctx: Ctx,
   req: AppRequest,
@@ -138,6 +164,7 @@ function render(
     status?: number;
   },
 ): AppResponse {
+  const section = navSection(req.path);
   return html(
     page({
       title: options.title,
@@ -145,6 +172,7 @@ function render(
       context:
         options.context ??
         (req.user !== undefined && req.path.startsWith('/workspace') ? 'workspace' : 'public'),
+      ...(section !== undefined ? { section } : {}),
       ...(req.user !== undefined ? { user: req.user } : {}),
       ...(req.session !== undefined ? { csrf: req.session.csrfToken } : {}),
       ...(req.user !== undefined ? { unreadCount: unreadCount(ctx.db, req.user.id) } : {}),
@@ -249,6 +277,9 @@ async function protocolOrApi(
   if (path === '/tg/grant-status') {
     return ctx.tg.tg.handleStatus(req);
   }
+  if (path.startsWith('/tg/action-status/')) {
+    return ctx.tg.tg.handleActionStatus(req);
+  }
   const apiRes = await apiDispatch(req);
   if (apiRes !== undefined) {
     return apiRes;
@@ -320,7 +351,7 @@ function buildRoutes(ctx: Ctx): Router {
     }
     return render(ctx, req, {
       title: `Search: ${q}`,
-      body: `<div class="page-head"><h1>Search</h1></div>
+      body: `<div class="page-head"><div><p class="eyebrow">Blogarithm</p><h1>Search</h1></div></div>
         <form method="get" action="/search" class="search-form search-big">
           <input name="q" placeholder="Search published posts" value="${q.replace(/"/g, '&quot;')}">
           <button class="btn btn-primary" type="submit">Search</button>
@@ -681,6 +712,7 @@ function buildRoutes(ctx: Ctx): Router {
         jti: r.jti,
         agentJkt: r.agentJkt,
         permissions: r.effectivePermissions ?? r.permissions,
+        constraints: r.effectiveConstraints ?? [],
         issuedAt: r.issuedAt,
         expiresAt: r.expiresAt,
         status: r.status,
@@ -694,6 +726,115 @@ function buildRoutes(ctx: Ctx): Router {
           Math.floor(Date.now() / 1000),
         ),
       });
+    }),
+  );
+
+  // ---------- pending actions (approval-gated requests, spec section 12.5) ----------
+
+  router.get(
+    '/workspace/approvals',
+    authed(async (req, user) => {
+      const records = await ctx.tg.tg.listPendingActions(user.id);
+      return render(ctx, req, {
+        title: 'Agent approvals',
+        context: 'workspace',
+        body: renderApprovalsPage(records),
+      });
+    }),
+  );
+
+  router.get(
+    '/workspace/approvals/:id',
+    authed(async (req, user) => {
+      const record = await ctx.tg.tg.config.stores.pendingActions.get(req.params.id ?? '');
+      if (record === undefined || record.subject !== user.id) {
+        return render(ctx, req, { title: 'Not found', body: renderNotFound(), status: 404 });
+      }
+      return render(ctx, req, {
+        title: 'Review proposed action',
+        context: 'workspace',
+        body: renderApprovalDetail(
+          record,
+          req.session?.csrfToken ?? '',
+          Math.floor(Date.now() / 1000),
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/workspace/approvals/decide',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const actionId = form.action_id ?? '';
+      const decision = form.decision === 'approve' ? 'approve' : 'reject';
+      try {
+        const record = await ctx.tg.tg.decidePendingAction(actionId, decision, user.id);
+        return redirect(`/workspace/approvals/${record.id}`);
+      } catch (err) {
+        if (isTrailGateError(err)) {
+          return render(ctx, req, {
+            title: 'Review proposed action',
+            context: 'workspace',
+            status: err.httpStatus === 404 ? 404 : 400,
+            body: renderError(err.message),
+          });
+        }
+        throw err;
+      }
+    }),
+  );
+
+  // Post-issuance scope control (spec section 13): the tri-state editor
+  // posts `mode_<permission>` fields; allow grants, approval marks a
+  // require_approval constraint, deny removes the permission.
+  router.post(
+    '/workspace/access/:jti/scope',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      const values = parseFormValues(req);
+      requireCsrf(req, form);
+      const jti = req.params.jti ?? '';
+      const record = await ctx.tg.tg.config.stores.grants.get(jti);
+      if (record === undefined || record.subject !== user.id) {
+        return render(ctx, req, { title: 'Not found', body: renderNotFound(), status: 404 });
+      }
+      const modes = parsePermissionModes(form, PERMISSIONS);
+      const selected = modes?.permissions ?? values.perm ?? [];
+      if (selected.length === 0) {
+        return render(ctx, req, {
+          title: 'Agent access',
+          context: 'workspace',
+          status: 400,
+          body: renderError('Keep at least one permission, or revoke the access instead.'),
+        });
+      }
+      const kept = (record.effectiveConstraints ?? []).filter(
+        (c) => modes === undefined || c.type !== 'require_approval',
+      );
+      const marked =
+        modes === undefined ? [] : modes.approvalPermissions.filter((p) => selected.includes(p));
+      try {
+        await ctx.tg.tg.updateGrantScope(jti, {
+          permissions: selected,
+          constraints: [
+            ...kept,
+            ...(marked.length > 0
+              ? [{ type: 'require_approval', params: { permissions: marked } }]
+              : []),
+          ],
+          actor: `user:${user.id}`,
+        });
+      } catch (err) {
+        return render(ctx, req, {
+          title: 'Agent access',
+          context: 'workspace',
+          status: 400,
+          body: renderError(err instanceof Error ? err.message : 'The change was refused.'),
+        });
+      }
+      return redirect('/workspace/access');
     }),
   );
 
@@ -733,6 +874,7 @@ function buildRoutes(ctx: Ctx): Router {
           permissions: view.effective.permissions,
           resources: view.effective.resources,
           requestedSeconds: view.requested.requestedSeconds ?? view.effective.lifetimeSeconds,
+          approvalSuggested: view.approvalSuggested,
         }),
       });
     } catch {
@@ -754,10 +896,20 @@ function buildRoutes(ctx: Ctx): Router {
     const requestId = form.request_id ?? '';
     const decision = form.decision === 'approve' ? 'approve' : 'deny';
     try {
-      if (decision === 'approve' && (values.perm ?? []).length === 0) {
+      // Tri-state consent posts `mode_<permission>` fields; a legacy `perm`
+      // checkbox post narrows permissions without approval marks.
+      const modes = parsePermissionModes(form, PERMISSIONS);
+      const picked = modes?.permissions ?? values.perm ?? [];
+      if (decision === 'approve' && picked.length === 0) {
         throw new Error('select at least one permission, or decline the request');
       }
-      const narrow = decision === 'approve' ? { permissions: values.perm ?? [] } : undefined;
+      const narrow =
+        decision === 'approve'
+          ? {
+              permissions: picked,
+              ...(modes !== undefined ? { approvalPermissions: modes.approvalPermissions } : {}),
+            }
+          : undefined;
       const outcome = await ctx.tg.tg.decideConsent(requestId, decision, req.user.id, narrow);
       if (outcome.redirectTo !== undefined) {
         return { status: 302, headers: { location: outcome.redirectTo } };
@@ -787,6 +939,7 @@ function buildRoutes(ctx: Ctx): Router {
             csrf: req.session?.csrfToken ?? '',
             permissions: view.effective.permissions,
             resources: view.effective.resources,
+            approvalSuggested: view.approvalSuggested,
             error: e instanceof Error ? e.message : 'authorization failed',
           }),
           status: 422,

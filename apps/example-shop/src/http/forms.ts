@@ -63,6 +63,40 @@ export function parseJsonBody(req: AppRequest): unknown {
   }
 }
 
+/**
+ * Reads the per-permission tri-state control (`mode_<permission>` fields
+ * with values `allow`, `approval`, or `deny`). When no `mode_` fields are
+ * present the caller falls back to legacy `perm` checkbox semantics, so old
+ * form posts keep working.
+ */
+export function parsePermissionModes(
+  form: Record<string, string>,
+  candidates: readonly string[],
+): { permissions: string[]; approvalPermissions: string[] } | undefined {
+  const known = new Set(candidates);
+  const permissions: string[] = [];
+  const approvalPermissions: string[] = [];
+  let sawMode = false;
+  for (const [key, value] of Object.entries(form)) {
+    if (!key.startsWith('mode_')) {
+      continue;
+    }
+    const permission = key.slice(5);
+    if (!known.has(permission)) {
+      continue;
+    }
+    sawMode = true;
+    if (value === 'deny') {
+      continue;
+    }
+    permissions.push(permission);
+    if (value === 'approval') {
+      approvalPermissions.push(permission);
+    }
+  }
+  return sawMode ? { permissions, approvalPermissions } : undefined;
+}
+
 export class CsrfError extends Error {
   constructor() {
     super('form token is missing or does not match the session');

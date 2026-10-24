@@ -477,6 +477,15 @@ export function createTrailGateTools(
                   },
                 }
               : {}),
+            ...(res.pending !== undefined
+              ? {
+                  pending_action: res.pending,
+                  pending_summary:
+                    'This was queued for the user to approve. Share the review link and wait for their decision; the action has not run. Poll with trailgate.action_status.',
+                  guidance:
+                    'Tell the user the action awaits their approval, share the review link, and stop. Do not retry the same request; it would only queue a duplicate.',
+                }
+              : {}),
             receipt:
               res.receipt === undefined
                 ? { present: false }
@@ -484,6 +493,45 @@ export function createTrailGateTools(
                   ? { present: true, verified: true, decision: res.receipt.payload.tg.decision }
                   : { present: true, verified: false },
             body,
+          });
+        } catch (err) {
+          return fail(err);
+        }
+      },
+    },
+    {
+      name: 'trailgate.action_status',
+      description:
+        "Check a pending action the site queued for human approval (returned by trailgate.fetch as pending_action). States: pending/approved/executing are open; succeeded carries the result; failed, rejected, expired, cancelled are terminal. Pass the action's id or its status_url.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: URL_ARG,
+          actionId: { type: 'string', description: 'pending action id or status_url' },
+          grantId: { type: 'string' },
+        },
+        required: ['url', 'actionId'],
+        additionalProperties: false,
+      },
+      handler: async (args) => {
+        try {
+          const raw = requireString(args, 'actionId');
+          const id = raw.includes('/') ? (raw.split('/').pop() ?? raw) : raw;
+          const view = await client.actionStatus(requireString(args, 'url'), id, {
+            ...(typeof args.grantId === 'string' ? { grantId: args.grantId } : {}),
+          });
+          return ok({
+            pending_action: view,
+            summary:
+              view.status === 'pending'
+                ? 'Still waiting for the user to decide.'
+                : view.status === 'succeeded'
+                  ? 'The user approved it and it ran successfully.'
+                  : view.status === 'rejected'
+                    ? 'The user rejected it.'
+                    : view.status === 'failed'
+                      ? 'It was approved but the execution failed.'
+                      : `The action is ${view.status}.`,
           });
         } catch (err) {
           return fail(err);

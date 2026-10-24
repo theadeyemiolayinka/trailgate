@@ -10,7 +10,31 @@ export const REGISTERED_CONSTRAINT_TYPES = [
   'valid_window',
   'spend_window',
   'approval_threshold',
+  'require_approval',
 ] as const;
+
+/**
+ * Constraint type for the per-permission tri-state policy (spec section 9):
+ * `{ type: 'require_approval', params: { permissions: [...] } }` marks
+ * granted permissions whose every operation queues for human approval.
+ * The third state, deny, is the permission being absent from the grant's
+ * effective set. The type is a directive consumed by request verification,
+ * not a limiter, so `evaluateConstraints` treats it as inert beyond shape
+ * validation.
+ */
+export const REQUIRE_APPROVAL_CONSTRAINT = 'require_approval';
+
+/** Returns the permissions a `require_approval` constraint applies to. */
+export function requireApprovalPermissions(constraint: Constraint): string[] {
+  if (constraint.type !== REQUIRE_APPROVAL_CONSTRAINT) {
+    return [];
+  }
+  const permissions = (constraint.params ?? {}).permissions;
+  if (!Array.isArray(permissions)) {
+    return [];
+  }
+  return permissions.filter((p): p is string => typeof p === 'string');
+}
 
 export interface ConstraintContext {
   grantId: string;
@@ -24,6 +48,13 @@ export interface ConstraintContext {
    * `approval_threshold` does not demand a fresh approval for them.
    */
   idempotentReplay?: boolean;
+  /**
+   * True when the request is routed through the pending-action flow
+   * (spec section 12.5): the queued human decision covers
+   * `approval_threshold`, so the constraint does not demand a separate
+   * per-request approval.
+   */
+  skipApprovalThreshold?: boolean;
   ledger?: Ledger;
   rateLimiter?: RateLimiter;
   approvals?: RequestApprovalChecker;
@@ -191,7 +222,11 @@ async function evaluateApprovalThreshold(
   ctx: ConstraintContext,
 ): Promise<void> {
   const limit = checkMoneyShape(params);
-  if (ctx.requestAmount === undefined || ctx.idempotentReplay === true) {
+  if (
+    ctx.requestAmount === undefined ||
+    ctx.idempotentReplay === true ||
+    ctx.skipApprovalThreshold === true
+  ) {
     return;
   }
   if (ctx.requestAmount.currency !== limit.currency) {
@@ -276,6 +311,17 @@ export async function evaluateConstraints(
         break;
       case 'approval_threshold':
         await evaluateApprovalThreshold(params, ctx);
+        break;
+      case REQUIRE_APPROVAL_CONSTRAINT:
+        // Per-permission tri-state directive: the verifier turns it into a
+        // require_approval policy decision before execution, so there is
+        // nothing to enforce here. Params must still be well-formed.
+        if (requireApprovalPermissions(constraint).length === 0) {
+          throw new TrailGateError(
+            Codes.CONSTRAINT_VIOLATED,
+            'require_approval constraint must list at least one permission',
+          );
+        }
         break;
       default:
         throw new TrailGateError(Codes.CONSTRAINT_UNKNOWN_TYPE, 'unknown constraint type', {

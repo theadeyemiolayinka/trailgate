@@ -131,6 +131,96 @@ export interface ProtectedResponse {
   body: Uint8Array;
   error?: { code: string; message: string; detail?: Record<string, unknown> };
   receipt?: ReceiptOutcome;
+  /**
+   * Set when the site queued the request as a pending action (a `202`
+   * response carrying `pending_action`, spec section 12.5). Queued is a
+   * successful submission awaiting a human decision, not a failure: the
+   * field carries the action id, review URL, and status endpoint to poll.
+   */
+  pending?: PendingActionView;
+}
+
+/**
+ * The `pending_action` member the site returns for queued actions and
+ * `GET action_status` responses (spec section 12.5).
+ */
+export interface PendingActionView {
+  id: string;
+  /** Registered action id from the site's discovery catalog. */
+  action: string;
+  /**
+   * Lifecycle state: `pending`, `approved`, `executing` are open;
+   * `succeeded`, `failed`, `rejected`, `expired`, `cancelled` are terminal.
+   */
+  status: string;
+  method: string;
+  url: string;
+  permission: string;
+  resource?: string;
+  amount?: { amount: number; currency: string };
+  /** Human-readable description of the proposed effect. */
+  summary: string;
+  detail?: Record<string, unknown>;
+  request_digest: string;
+  grant_id: string;
+  created_at: number;
+  expires_at: number;
+  decided_at?: number;
+  decided_by?: string;
+  reason?: string;
+  executed_at?: number;
+  /** The executed handler's response on terminal records. */
+  result?: { status: number; body?: unknown };
+  /** Signed `GET` endpoint to poll for this action's state. */
+  status_url: string;
+  /** Human-facing page where the site user reviews the proposal. */
+  review_url: string;
+}
+
+const PENDING_ACTION_STATES = new Set([
+  'pending',
+  'approved',
+  'executing',
+  'succeeded',
+  'failed',
+  'rejected',
+  'expired',
+  'cancelled',
+]);
+
+/** Parses a `pending_action` member defensively; undefined when malformed. */
+export function parsePendingActionView(value: unknown): PendingActionView | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const v = value as Record<string, unknown>;
+  if (
+    typeof v.id !== 'string' ||
+    typeof v.action !== 'string' ||
+    typeof v.status !== 'string' ||
+    !PENDING_ACTION_STATES.has(v.status)
+  ) {
+    return undefined;
+  }
+  return v as unknown as PendingActionView;
+}
+
+/**
+ * Extracts the pending action a `202` response queued, if any. Pair with
+ * `res.pending`, which `executeProtectedRequest` sets automatically.
+ */
+export function pendingActionOf(res: ProtectedResponse): PendingActionView | undefined {
+  if (res.pending !== undefined) {
+    return res.pending;
+  }
+  if (res.status !== 202) {
+    return undefined;
+  }
+  const parsed = parseJsonBytes(res.body);
+  if (typeof parsed !== 'object' || parsed === null) {
+    return undefined;
+  }
+  return parsePendingActionView((parsed as Record<string, unknown>).pending_action);
 }
 
 /** Parses the JSON body, or undefined when absent or invalid. */
@@ -206,6 +296,10 @@ export async function executeProtectedRequest(
   });
   if (receipt !== undefined) {
     out.receipt = receipt;
+  }
+  const pending = pendingActionOf(out);
+  if (pending !== undefined) {
+    out.pending = pending;
   }
   return out;
 }

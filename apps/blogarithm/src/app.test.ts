@@ -268,7 +268,30 @@ test('trailgate: draft permission cannot publish; second grant can; revocation d
     grantId: grant2.jti,
     target: `/api/posts/${draft.post.id}/publish`,
   });
-  assert.equal(published.status, 200);
+  // Publishing is approval-gated (spec section 12.5): the call queues a
+  // pending action and the post stays a draft until the user decides.
+  assert.equal(published.status, 202);
+  assert.equal(published.pending?.status, 'pending');
+  const actionId = published.pending?.id as string;
+  assert.ok(actionId.startsWith('pact_'));
+  const stillDraft = app.db.prepare('SELECT status FROM posts WHERE id = ?').get(draft.post.id) as {
+    status: string;
+  };
+  assert.equal(stillDraft.status, 'draft');
+
+  const approveCsrf = await csrfOf(app, cookie, `/workspace/approvals/${actionId}`);
+  const approve = await req(app, 'POST', '/workspace/approvals/decide', {
+    cookie,
+    form: { _csrf: approveCsrf, action_id: actionId, decision: 'approve' },
+  });
+  assert.equal(approve.status, 303);
+
+  const actionStatus = await client.actionStatus(site, actionId, { grantId: grant2.jti });
+  assert.equal(actionStatus.status, 'succeeded');
+  const nowPublished = app.db
+    .prepare('SELECT status FROM posts WHERE id = ?')
+    .get(draft.post.id) as { status: string };
+  assert.equal(nowPublished.status, 'published');
 
   const deniedDelete = await client.fetchProtected(site, {
     method: 'DELETE',
@@ -381,4 +404,146 @@ test('demo account exists and profile is complete', async () => {
   const cookie = await login(app);
   const page = await req(app, 'GET', '/workspace', { cookie });
   assert.equal(page.status, 200);
+});
+
+test('tri-state: consent marks queue actions; the access editor changes them live', async () => {
+  const app = makeApp();
+  const transport = directTransport(app);
+  const client = createAgentClient({ transport });
+  client.useKey(SoftwareKeyProvider.generate());
+  const site = await client.discover(ISSUER);
+  const cookie = await login(app);
+
+  const session = await client.requestGrant(site, {
+    permissions: ['tg.posts.read', 'tg.posts.create', 'tg.posts.update', 'tg.comments.read'],
+  });
+
+  // The consent page renders a tri-state selector per requested permission.
+  const consentPage = await req(app, 'GET', `/tg/consent?request_id=${session.requestId}`, {
+    cookie,
+  });
+  assert.ok(String(consentPage.body).includes('name="mode_tg.posts.create"'));
+  const csrf = String(consentPage.body).match(/name="_csrf" value="([^"]+)"/)?.[1];
+  assert.ok(csrf !== undefined);
+
+  // allow reads, require approval on creates, deny updates and comments.
+  const decided = await app.handle({
+    method: 'POST',
+    url: '/tg/consent',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new TextEncoder().encode(
+      new URLSearchParams([
+        ['_csrf', csrf],
+        ['request_id', session.requestId],
+        ['decision', 'approve'],
+        ['mode_tg.posts.read', 'allow'],
+        ['mode_tg.posts.create', 'approval'],
+        ['mode_tg.posts.update', 'deny'],
+        ['mode_tg.comments.read', 'deny'],
+      ]).toString(),
+    ),
+  });
+  assert.ok(decided.status === 200 || decided.status === 303, `consent: ${decided.status}`);
+  const grant = await client.awaitApproval(session.requestId, { intervalMs: 20 });
+
+  // The marks persisted into the grant's effective scope.
+  const scope = await app.tg.tg.config.stores.grants.currentScope(grant.jti);
+  assert.deepEqual(scope?.permissions.sort(), ['tg.posts.create', 'tg.posts.read']);
+  const marked = (scope?.constraints ?? []).find((c) => c.type === 'require_approval');
+  assert.deepEqual(marked?.params?.permissions, ['tg.posts.create']);
+
+  // allow: reads execute immediately.
+  const list = await client.fetchProtected(site, {
+    method: 'GET',
+    grantId: grant.jti,
+    target: '/api/posts',
+  });
+  assert.equal(list.status, 200);
+
+  // require approval: creates queue a pending action instead of running.
+  const queued = await client.fetchProtected(site, {
+    method: 'POST',
+    grantId: grant.jti,
+    target: '/api/posts',
+    body: JSON.stringify({ title: 'Tri-state draft', body: 'queued for review' }),
+  });
+  assert.equal(queued.status, 202);
+  assert.equal(queued.pending?.status, 'pending');
+  const actionId = queued.pending?.id as string;
+  assert.ok(actionId.startsWith('pact_'));
+
+  // deny: updates are refused outright without a pending record.
+  const denied = await client.fetchProtected(site, {
+    method: 'PATCH',
+    grantId: grant.jti,
+    target: '/api/posts/post_nonexistent',
+    body: JSON.stringify({ title: 'x' }),
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.error?.code, 'tg.request.permission_denied');
+
+  // The human approves the queued create and it executes.
+  const approveCsrf = await csrfOf(app, cookie, `/workspace/approvals/${actionId}`);
+  const approve = await req(app, 'POST', '/workspace/approvals/decide', {
+    cookie,
+    form: { _csrf: approveCsrf, action_id: actionId, decision: 'approve' },
+  });
+  assert.equal(approve.status, 303);
+  const done = await client.actionStatus(site, actionId, { grantId: grant.jti });
+  assert.equal(done.status, 'succeeded');
+
+  // The access page editor flips reads to approval-only and frees creates.
+  const editCsrf = await csrfOf(app, cookie, '/workspace/access');
+  const edit = new URLSearchParams({ _csrf: editCsrf });
+  for (const perm of [
+    'tg.posts.read',
+    'tg.posts.create',
+    'tg.posts.update',
+    'tg.posts.publish',
+    'tg.posts.delete',
+    'tg.posts.settings',
+    'tg.comments.read',
+    'tg.comments.delete',
+    'tg.notifications.read',
+    'tg.notifications.write',
+    'tg.profile.read',
+  ]) {
+    edit.append(
+      `mode_${perm}`,
+      perm === 'tg.posts.read' ? 'approval' : perm === 'tg.posts.create' ? 'allow' : 'deny',
+    );
+  }
+  const scoped = await app.handle({
+    method: 'POST',
+    url: `/workspace/access/${grant.jti}/scope`,
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new TextEncoder().encode(edit.toString()),
+  });
+  assert.equal(scoped.status, 303);
+
+  // reads now queue; creates run immediately.
+  const readQueued = await client.fetchProtected(site, {
+    method: 'GET',
+    grantId: grant.jti,
+    target: '/api/posts',
+  });
+  assert.equal(readQueued.status, 202);
+  const readActionId = readQueued.pending?.id as string;
+
+  const createNow = await client.fetchProtected(site, {
+    method: 'POST',
+    grantId: grant.jti,
+    target: '/api/posts',
+    body: JSON.stringify({ title: 'Now allowed', body: 'no review needed' }),
+  });
+  assert.equal(createNow.status, 201);
+
+  const readApproveCsrf = await csrfOf(app, cookie, `/workspace/approvals/${readActionId}`);
+  const readApprove = await req(app, 'POST', '/workspace/approvals/decide', {
+    cookie,
+    form: { _csrf: readApproveCsrf, action_id: readActionId, decision: 'approve' },
+  });
+  assert.equal(readApprove.status, 303);
+  const readDone = await client.actionStatus(site, readActionId, { grantId: grant.jti });
+  assert.equal(readDone.status, 'succeeded');
 });

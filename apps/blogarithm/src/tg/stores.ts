@@ -8,6 +8,9 @@ import type {
   GrantRequestStatus,
   GrantRequestStore,
   IssuedGrantRecord,
+  PendingActionRecord,
+  PendingActionState,
+  PendingActionStore,
   RequestApprovalRecord,
   RequestApprovalStore,
   RequestIdempotencyStore,
@@ -233,9 +236,9 @@ export function createGrantRegistry(db: Db): GrantRegistry {
       db.prepare(
         `INSERT INTO tg_grants
          (jti, issued_at, expires_at, agent_jkt, subject, request_id, status,
-          permissions, effective_permissions,
+          permissions, effective_permissions, effective_resources, effective_constraints,
           revoked_at, revocation_reason, revocation_actor)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         record.jti,
         record.issuedAt,
@@ -247,6 +250,10 @@ export function createGrantRegistry(db: Db): GrantRegistry {
         JSON.stringify(record.permissions),
         record.effectivePermissions !== undefined
           ? JSON.stringify(record.effectivePermissions)
+          : null,
+        record.effectiveResources !== undefined ? JSON.stringify(record.effectiveResources) : null,
+        record.effectiveConstraints !== undefined
+          ? JSON.stringify(record.effectiveConstraints)
           : null,
         record.revokedAt ?? null,
         record.revocationReason ?? null,
@@ -792,6 +799,229 @@ export function createApprovalStore(db: Db): RequestApprovalStore {
         `UPDATE tg_request_approvals SET state = 'approved'
          WHERE id = ? AND state = 'used'`,
       ).run(id);
+    },
+  };
+}
+interface PendingActionRow {
+  id: string;
+  grant_id: string;
+  agent_jkt: string;
+  subject: string | null;
+  action_id: string;
+  permission: string;
+  method: string;
+  url: string;
+  body: string | null;
+  content_type: string | null;
+  signature_base: string;
+  request_digest: string;
+  content_digest: string;
+  resource: string | null;
+  amount_minor: number | null;
+  currency: string | null;
+  summary: string;
+  detail: string | null;
+  scope_permissions: string;
+  scope_resources: string;
+  scope_constraints: string;
+  state: PendingActionState;
+  created_at: number;
+  expires_at: number;
+  decided_at: number | null;
+  decided_by: string | null;
+  reason: string | null;
+  executed_at: number | null;
+  outcome: string | null;
+}
+
+function pendingActionOfRow(row: PendingActionRow): PendingActionRecord {
+  const record: PendingActionRecord = {
+    id: row.id,
+    grantId: row.grant_id,
+    agentJkt: row.agent_jkt,
+    actionId: row.action_id,
+    permission: row.permission,
+    scopePermissions: JSON.parse(row.scope_permissions) as string[],
+    scopeResources: JSON.parse(row.scope_resources) as string[],
+    scopeConstraints: JSON.parse(row.scope_constraints) as Constraint[],
+    method: row.method,
+    url: row.url,
+    signatureBase: row.signature_base,
+    requestDigest: row.request_digest,
+    contentDigest: row.content_digest,
+    summary: row.summary,
+    state: row.state,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  };
+  if (row.subject !== null) record.subject = row.subject;
+  if (row.body !== null) record.body = row.body;
+  if (row.content_type !== null) record.contentType = row.content_type;
+  if (row.resource !== null) record.resource = row.resource;
+  if (row.amount_minor !== null && row.currency !== null) {
+    record.amount = { amount: row.amount_minor, currency: row.currency };
+  }
+  const detail = parseJsonColumn<Record<string, unknown>>(row.detail);
+  if (detail !== undefined) record.detail = detail;
+  if (row.decided_at !== null) record.decidedAt = row.decided_at;
+  if (row.decided_by !== null) record.decidedBy = row.decided_by;
+  if (row.reason !== null) record.reason = row.reason;
+  if (row.executed_at !== null) record.executedAt = row.executed_at;
+  const outcome = parseJsonColumn<PendingActionRecord['outcome']>(row.outcome);
+  if (outcome !== undefined) record.outcome = outcome;
+  return record;
+}
+
+const PENDING_PATCH_COLUMNS: Record<string, string> = {
+  state: 'state',
+  decidedAt: 'decided_at',
+  decidedBy: 'decided_by',
+  reason: 'reason',
+  executedAt: 'executed_at',
+  outcome: 'outcome',
+};
+
+/**
+ * Pending actions (spec section 12.5) on SQLite. Single-decision and
+ * single-claim semantics come from conditional UPDATEs on state; the
+ * partial unique index `idx_tg_pending_open_digest` makes insert dedupe of
+ * a byte-identical open proposal atomic under concurrency.
+ */
+export function createPendingActionStore(db: Db): PendingActionStore {
+  const getRow = (id: string) =>
+    db.prepare('SELECT * FROM tg_pending_actions WHERE id = ?').get(id) as unknown as
+      | PendingActionRow
+      | undefined;
+  const openByDigest = (grantId: string, requestDigest: string) =>
+    db
+      .prepare(
+        `SELECT * FROM tg_pending_actions
+         WHERE grant_id = ? AND request_digest = ?
+           AND state IN ('pending','approved','executing')
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(grantId, requestDigest) as unknown as PendingActionRow | undefined;
+  return {
+    insert: async (record) => {
+      try {
+        db.prepare(
+          `INSERT INTO tg_pending_actions
+           (id, grant_id, agent_jkt, subject, action_id, permission, method, url, body,
+            content_type, signature_base, request_digest, content_digest, resource,
+            amount_minor, currency, summary, detail, scope_permissions, scope_resources,
+            scope_constraints, state, created_at, expires_at, decided_at, decided_by,
+            reason, executed_at, outcome)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          record.id,
+          record.grantId,
+          record.agentJkt,
+          record.subject ?? null,
+          record.actionId,
+          record.permission,
+          record.method,
+          record.url,
+          record.body ?? null,
+          record.contentType ?? null,
+          record.signatureBase,
+          record.requestDigest,
+          record.contentDigest,
+          record.resource ?? null,
+          record.amount?.amount ?? null,
+          record.amount?.currency ?? null,
+          record.summary,
+          record.detail === undefined ? null : JSON.stringify(record.detail),
+          JSON.stringify(record.scopePermissions),
+          JSON.stringify(record.scopeResources),
+          JSON.stringify(record.scopeConstraints),
+          record.state,
+          record.createdAt,
+          record.expiresAt,
+          record.decidedAt ?? null,
+          record.decidedBy ?? null,
+          record.reason ?? null,
+          record.executedAt ?? null,
+          record.outcome === undefined ? null : JSON.stringify(record.outcome),
+        );
+        return { kind: 'inserted' };
+      } catch (err) {
+        // node:sqlite reports ERR_SQLITE_ERROR with the constraint in the
+        // message; SQLCipher-style builds expose SQLITE_CONSTRAINT_* codes.
+        const code = (err as { code?: string }).code;
+        const message = err instanceof Error ? err.message : '';
+        if (
+          code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+          code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+          message.includes('UNIQUE constraint failed')
+        ) {
+          const existing = openByDigest(record.grantId, record.requestDigest);
+          if (existing !== undefined) {
+            return { kind: 'existing', record: pendingActionOfRow(existing) };
+          }
+        }
+        throw err;
+      }
+    },
+    get: async (id) => {
+      const row = getRow(id);
+      return row === undefined ? undefined : pendingActionOfRow(row);
+    },
+    listBySubject: async (subject) => {
+      const rows = db
+        .prepare('SELECT * FROM tg_pending_actions WHERE subject = ? ORDER BY created_at DESC')
+        .all(subject) as unknown as PendingActionRow[];
+      return rows.map(pendingActionOfRow);
+    },
+    listOpenByGrant: async (grantId) => {
+      const rows = db
+        .prepare(
+          `SELECT * FROM tg_pending_actions
+           WHERE grant_id = ? AND state IN ('pending','approved','executing')`,
+        )
+        .all(grantId) as unknown as PendingActionRow[];
+      return rows.map(pendingActionOfRow);
+    },
+    countOpenByGrant: async (grantId) => {
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM tg_pending_actions
+           WHERE grant_id = ? AND state IN ('pending','approved','executing')`,
+        )
+        .get(grantId) as unknown as { n: number };
+      return row.n;
+    },
+    transition: async (id, from, patch) => {
+      const assignments: string[] = [];
+      const values: (string | number | null)[] = [];
+      for (const [key, column] of Object.entries(PENDING_PATCH_COLUMNS)) {
+        if (!(key in patch)) {
+          continue;
+        }
+        const value = (patch as Record<string, unknown>)[key];
+        assignments.push(`${column} = ?`);
+        values.push(
+          key === 'outcome'
+            ? value === undefined || value === null
+              ? null
+              : JSON.stringify(value)
+            : ((value ?? null) as string | number | null),
+        );
+      }
+      if (assignments.length === 0) {
+        return undefined;
+      }
+      const placeholders = from.map(() => '?').join(',');
+      const result = db
+        .prepare(
+          `UPDATE tg_pending_actions SET ${assignments.join(', ')}
+           WHERE id = ? AND state IN (${placeholders})`,
+        )
+        .run(...values, id, ...from);
+      if (result.changes === 0) {
+        return undefined;
+      }
+      const row = getRow(id);
+      return row === undefined ? undefined : pendingActionOfRow(row);
     },
   };
 }

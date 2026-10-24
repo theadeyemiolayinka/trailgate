@@ -37,12 +37,19 @@ import {
   topUp,
   WalletError,
 } from './domain/wallet.ts';
-import { CsrfError, parseCookies, parseForm, parseFormValues, requireCsrf } from './http/forms.ts';
+import {
+  CsrfError,
+  parseCookies,
+  parseForm,
+  parseFormValues,
+  parsePermissionModes,
+  requireCsrf,
+} from './http/forms.ts';
 import { html, redirect } from './http/responses.ts';
 import type { AppRequest, AppResponse } from './http/router.ts';
 import { Router } from './http/router.ts';
 import { createShopTrailGate, type ShopTrailGate } from './tg/server.ts';
-import { bindShopSelectors } from './tg/vocabulary.ts';
+import { bindShopSelectors, PERMISSIONS } from './tg/vocabulary.ts';
 import { page } from './ui/layout.ts';
 import { renderAddresses, renderProfile } from './ui/pages/account.ts';
 import { type ActivityRow, renderActivity } from './ui/pages/activity.ts';
@@ -60,6 +67,7 @@ import { renderConsent } from './ui/pages/consent.ts';
 import { renderHome } from './ui/pages/home.ts';
 import { renderInvoice } from './ui/pages/invoice.ts';
 import { renderOrderDetail, renderOrderList } from './ui/pages/orders.ts';
+import { renderPendingAction, renderPendingActions } from './ui/pages/pending-actions.ts';
 import { renderProduct } from './ui/pages/product.ts';
 import {
   type ReceiptVerdict,
@@ -98,7 +106,8 @@ function isProtectedPath(path: string): boolean {
     path === '/tg/grant-request' ||
     path === '/tg/grant-redemption' ||
     path === '/tg/grant-revocation' ||
-    path === '/tg/grant-status'
+    path === '/tg/grant-status' ||
+    path.startsWith('/tg/action-status/')
   );
 }
 
@@ -254,6 +263,9 @@ async function protocolOrApi(
   }
   if (path === '/tg/grant-status') {
     return ctx.tg.tg.handleStatus(req);
+  }
+  if (path.startsWith('/tg/action-status/')) {
+    return ctx.tg.tg.handleActionStatus(req);
   }
   const apiRes = await apiDispatch(req);
   if (apiRes !== undefined) {
@@ -840,7 +852,10 @@ function buildRoutes(ctx: Ctx): Router {
       if (grantRow?.subject !== user.id) {
         return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
       }
-      const selected = formValues.perm ?? [];
+      // The tri-state control posts `mode_<permission>` fields; the legacy
+      // `perm` checkbox post still works and keeps existing marks.
+      const modes = parsePermissionModes(form, PERMISSIONS);
+      const selected = modes?.permissions ?? formValues.perm ?? [];
       if (selected.length === 0) {
         return render(ctx, req, {
           title: 'Nothing selected',
@@ -859,8 +874,15 @@ function buildRoutes(ctx: Ctx): Router {
       const current = grantViewOf(grantRow);
       const currency = ctx.tg.spendingPolicy.currency;
       const kept = current.constraints.filter(
-        (c) => c.type !== 'max_amount' && c.type !== 'cumulative_budget',
+        (c) =>
+          c.type !== 'max_amount' &&
+          c.type !== 'cumulative_budget' &&
+          (modes === undefined || c.type !== 'require_approval'),
       );
+      // Only tri-state posts rewrite the require_approval constraint; a
+      // legacy checkbox post leaves existing approval marks untouched.
+      const marked =
+        modes === undefined ? [] : modes.approvalPermissions.filter((p) => selected.includes(p));
       const moneyField = (name: string, cap: number): number => {
         const raw = form[name];
         if (raw === undefined || raw.trim() === '') {
@@ -889,6 +911,9 @@ function buildRoutes(ctx: Ctx): Router {
               currency,
             },
           },
+          ...(marked.length > 0
+            ? [{ type: 'require_approval', params: { permissions: marked } }]
+            : []),
         ];
         await ctx.tg.tg.updateGrantScope(jti, {
           permissions: selected,
@@ -1172,9 +1197,11 @@ function buildRoutes(ctx: Ctx): Router {
       const requestId = form.request_id ?? '';
       const decision = form.decision === 'approve' ? 'approve' : 'deny';
       try {
-        // The scope editor posts each approved permission as a repeated
-        // `perm` field; unchecked permissions are simply not narrowed in.
-        if (decision === 'approve' && (formValues.perm ?? []).length === 0) {
+        // The consent tri-state posts `mode_<permission>` fields; a legacy
+        // `perm` checkbox post narrows permissions without approval marks.
+        const modes = parsePermissionModes(form, PERMISSIONS);
+        const picked = modes?.permissions ?? formValues.perm ?? [];
+        if (decision === 'approve' && picked.length === 0) {
           throw new TrailGateError(
             Codes.REQUEST_MALFORMED,
             'select at least one permission, or deny the request',
@@ -1187,7 +1214,8 @@ function buildRoutes(ctx: Ctx): Router {
         const narrow =
           decision === 'approve'
             ? {
-                permissions: formValues.perm ?? [],
+                permissions: picked,
+                ...(modes !== undefined ? { approvalPermissions: modes.approvalPermissions } : {}),
                 ...(lifetimeSeconds !== undefined ? { lifetimeSeconds } : {}),
               }
             : undefined;
@@ -1264,6 +1292,65 @@ function buildRoutes(ctx: Ctx): Router {
         if (isTrailGateError(err)) {
           return render(ctx, req, {
             title: 'Approve agent charge',
+            section: 'account',
+            status: err.httpStatus === 404 ? 404 : 400,
+            body: renderError(err.message),
+          });
+        }
+        throw err;
+      }
+    }),
+  );
+
+  // ---------- pending actions (approval-gated requests, spec section 12.5) ----------
+
+  router.get(
+    '/account/approvals',
+    authed(async (req, user) => {
+      const records = await ctx.tg.tg.listPendingActions(user.id);
+      return render(ctx, req, {
+        title: 'Agent approvals',
+        section: 'account',
+        body: renderPendingActions(records),
+      });
+    }),
+  );
+
+  router.get(
+    '/account/approvals/:id',
+    authed(async (req, user) => {
+      const record = await ctx.tg.tg.config.stores.pendingActions.get(req.params.id as string);
+      if (record === undefined || record.subject !== user.id) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      return render(ctx, req, {
+        title: 'Review agent action',
+        section: 'account',
+        body: renderPendingAction(
+          {
+            ...(req.user !== undefined ? { user: req.user } : {}),
+            ...(req.session !== undefined ? { session: req.session } : {}),
+          },
+          record,
+        ),
+      });
+    }),
+  );
+
+  router.post(
+    '/account/approvals/decide',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const actionId = form.action_id ?? '';
+      const decision = form.decision === 'approve' ? 'approve' : 'reject';
+      try {
+        const record = await ctx.tg.tg.decidePendingAction(actionId, decision, user.id);
+        return redirect(`/account/approvals/${record.id}`);
+      } catch (err) {
+        if (isTrailGateError(err)) {
+          return render(ctx, req, {
+            title: 'Review agent action',
             section: 'account',
             status: err.httpStatus === 404 ? 404 : 400,
             body: renderError(err.message),

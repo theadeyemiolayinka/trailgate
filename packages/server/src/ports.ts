@@ -274,6 +274,128 @@ export interface RequestApprovalStore {
   restore(id: string, now: number): Promise<void>;
 }
 
+/**
+ * Lifecycle states of a pending action (spec section 12.5). Terminal states
+ * are `succeeded`, `failed`, `rejected`, `expired`, and `cancelled`.
+ * `approved` is an approval decision, not an execution result: the proposal
+ * still has to be claimed (`executing`) and the handler has to succeed
+ * (`succeeded`).
+ */
+export type PendingActionState =
+  | 'pending'
+  | 'approved'
+  | 'executing'
+  | 'succeeded'
+  | 'failed'
+  | 'rejected'
+  | 'expired'
+  | 'cancelled';
+
+/**
+ * A queued action proposal awaiting (or carrying) a human decision. The
+ * record stores an immutable snapshot of the proposed operation — method,
+ * absolute URL, body bytes, resolved resource and amount — identified by
+ * `requestDigest` (the same operation digest the idempotency layer uses).
+ * It never stores the grant token, signatures, or any credential.
+ */
+export interface PendingActionRecord {
+  id: string;
+  /** Grant the proposing request was verified under. */
+  grantId: string;
+  /** Agent key thumbprint bound to that grant. */
+  agentJkt: string;
+  /** Site user context (grant `sub`) the action operates under. */
+  subject?: string;
+  /** Registered action id that declared `approval: 'required'`. */
+  actionId: string;
+  /** The `tg.*` permission the route requires. */
+  permission: string;
+  /**
+   * The effective scope evaluated when the proposal was queued. At
+   * execution the site's current effective scope replaces each member that
+   * was post-issuance overridden; these snapshots are the fallback
+   * (mirroring how the signed grant supplies the pre-override set).
+   */
+  scopePermissions: string[];
+  scopeResources: string[];
+  scopeConstraints: import('@trailgate/core').Constraint[];
+  method: string;
+  /** Absolute URL of the proposed request, exactly as the agent sent it. */
+  url: string;
+  /** Exact body bytes the agent submitted; replayed verbatim on execution. */
+  body?: string;
+  /** Content-Type of the submitted body, when one was sent. */
+  contentType?: string;
+  /**
+   * The signature base of the original verified request, retained so the
+   * execution receipt binds to the same request digest. Contains covered
+   * component values only; never the signature or grant token.
+   */
+  signatureBase: string;
+  /** SHA-256 operation digest of (method, url, content-digest, grant jti). */
+  requestDigest: string;
+  /** Content-Digest header value the digest was computed over. */
+  contentDigest: string;
+  /** Resource selector resolved at queue time, when the route declares one. */
+  resource?: string;
+  /** Amount resolved at queue time, when the route declares one. */
+  amount?: Money;
+  /** Human-readable description of the proposed effect, from `route.describe`. */
+  summary: string;
+  /** Structured detail for the review page; JSON-safe, server-generated. */
+  detail?: Record<string, unknown>;
+  state: PendingActionState;
+  createdAt: number;
+  expiresAt: number;
+  decidedAt?: number;
+  /** Site user id that decided, set on approve/reject. */
+  decidedBy?: string;
+  /** Rejection/cancellation/failure reason, safe for display. */
+  reason?: string;
+  executedAt?: number;
+  /**
+   * The executed handler's response, recorded for agent status lookups.
+   * `outcome.headers` carries the execution receipt under
+   * `trailgate-receipt`.
+   */
+  outcome?: StoredOutcome;
+}
+
+/**
+ * Pending-action store (spec section 12.5). `transition` is the CAS
+ * primitive every state change goes through; it is what makes approval
+ * single-decision and execution single-claim.
+ */
+export interface PendingActionStore {
+  /**
+   * Inserts the record, or returns the already-open record for the same
+   * `(grantId, requestDigest)` when one exists — re-submitting a byte-
+   * identical proposal returns the live action instead of duplicating it.
+   * Implementations MUST enforce this atomically (a partial unique index
+   * on open states, or an equivalent check-and-insert).
+   */
+  insert(
+    record: PendingActionRecord,
+  ): Promise<{ kind: 'inserted' } | { kind: 'existing'; record: PendingActionRecord }>;
+  get(id: string): Promise<PendingActionRecord | undefined>;
+  /** All records for a grant subject, newest first. */
+  listBySubject(subject: string): Promise<PendingActionRecord[]>;
+  /** Non-terminal records under one grant (pending, approved, executing). */
+  listOpenByGrant(grantId: string): Promise<PendingActionRecord[]>;
+  countOpenByGrant(grantId: string): Promise<number>;
+  /**
+   * Atomically moves a record out of one of `from` states while applying
+   * `patch`. Returns the updated record, or undefined when the stored state
+   * is not in `from`. Equivalent to
+   * `UPDATE ... WHERE id = ? AND state IN (from)`.
+   */
+  transition(
+    id: string,
+    from: PendingActionState[],
+    patch: Partial<PendingActionRecord> & { state: PendingActionState },
+  ): Promise<PendingActionRecord | undefined>;
+}
+
 /** The outcome recorded for an `Idempotency-Key` and returned on replay. */
 export interface StoredOutcome {
   status: number;

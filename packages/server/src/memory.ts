@@ -8,6 +8,9 @@ import type {
   GrantRequestRecord,
   GrantRequestStore,
   IssuedGrantRecord,
+  PendingActionRecord,
+  PendingActionState,
+  PendingActionStore,
   RequestApprovalRecord,
   RequestApprovalStore,
   RequestIdempotencyStore,
@@ -327,6 +330,56 @@ export function createInMemoryAuditSink(): InMemoryAuditSink {
       const id = randomId('evt');
       entries.push({ id, event });
       return id;
+    },
+  };
+}
+
+const OPEN_PENDING_STATES: readonly PendingActionState[] = ['pending', 'approved', 'executing'];
+
+/**
+ * In-memory pending-action store (spec section 12.5). Same caveat as the
+ * other in-memory adapters: single-process only, not durable.
+ */
+export function createInMemoryPendingActionStore(): PendingActionStore {
+  const records = new Map<string, PendingActionRecord>();
+  return {
+    insert: async (record) => {
+      for (const existing of records.values()) {
+        if (
+          existing.grantId === record.grantId &&
+          existing.requestDigest === record.requestDigest &&
+          OPEN_PENDING_STATES.includes(existing.state)
+        ) {
+          return { kind: 'existing', record: existing };
+        }
+      }
+      records.set(record.id, record);
+      return { kind: 'inserted' };
+    },
+    get: async (id) => records.get(id),
+    listBySubject: async (subject) =>
+      [...records.values()]
+        .filter((record) => record.subject === subject)
+        .sort((a, b) => b.createdAt - a.createdAt),
+    listOpenByGrant: async (grantId) =>
+      [...records.values()].filter(
+        (record) => record.grantId === grantId && OPEN_PENDING_STATES.includes(record.state),
+      ),
+    countOpenByGrant: async (grantId) =>
+      [...records.values()].filter(
+        (record) => record.grantId === grantId && OPEN_PENDING_STATES.includes(record.state),
+      ).length,
+    transition: async (id, from, patch) => {
+      const record = records.get(id);
+      if (record === undefined || !from.includes(record.state)) {
+        return undefined;
+      }
+      const cleaned = Object.fromEntries(
+        Object.entries(patch).filter(([, value]) => value !== undefined),
+      );
+      const next = Object.assign({}, record, cleaned) as PendingActionRecord;
+      records.set(id, next);
+      return next;
     },
   };
 }

@@ -1419,6 +1419,23 @@ img {
 .scope-choice + .scope-choice {
   border-top: 1px solid var(--line);
 }
+.scope-choice-tristate {
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.mode-choices {
+  display: inline-flex;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+.mode-choice {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: baseline;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
 .perm-editor {
   margin-top: var(--space-4);
   border-top: 1px solid var(--line);

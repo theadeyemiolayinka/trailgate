@@ -62,18 +62,70 @@ async function consentViaBrowserPath(requestId: string): Promise<void> {
   if (csrf === undefined) {
     throw new Error('consent page did not render a CSRF token');
   }
+  // The consent form renders a tri-state radio per permission
+  // (`mode_<perm>` = allow|approval|deny); submit the checked defaults the
+  // page rendered, which mark site-suggested permissions as approval.
+  const params = new URLSearchParams({
+    _csrf: csrf,
+    request_id: requestId,
+    decision: 'approve',
+  });
+  const groups = [
+    ...new Set([...html.matchAll(/name="mode_([^"]+)"/g)].map((m) => m[1] as string)),
+  ];
+  if (groups.length === 0) {
+    throw new Error('consent page rendered no permission controls');
+  }
+  for (const perm of groups) {
+    const checked = html.match(
+      new RegExp(`name="mode_${perm.replace(/\./g, '\\.')}" value="([^"]+)" checked`),
+    );
+    params.append(`mode_${perm}`, checked?.[1] ?? 'allow');
+  }
   const decide = await fetch(`${HTTP_BASE}/tg/consent/decide`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+    redirect: 'manual',
+  });
+  if (decide.status !== 303) {
+    throw new Error(`consent decision failed: ${decide.status}`);
+  }
+}
+
+/** Logs in over real HTTP and approves a pending action on the review page. */
+async function approveActionViaBrowserPath(actionId: string): Promise<void> {
+  const login = await fetch(`${HTTP_BASE}/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      email: 'ada@example.com',
+      password: 'demo-pass-1234',
+      next: '/',
+    }).toString(),
+    redirect: 'manual',
+  });
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] as string;
+  const page = await fetch(`${HTTP_BASE}/account/approvals/${actionId}`, {
+    headers: { cookie },
+  });
+  const html = await page.text();
+  const csrf = html.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  if (csrf === undefined) {
+    throw new Error('approvals page did not render a CSRF token');
+  }
+  const decide = await fetch(`${HTTP_BASE}/account/approvals/decide`, {
     method: 'POST',
     headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       _csrf: csrf,
-      request_id: requestId,
+      action_id: actionId,
       decision: 'approve',
     }).toString(),
     redirect: 'manual',
   });
   if (decide.status !== 303) {
-    throw new Error(`consent decision failed: ${decide.status}`);
+    throw new Error(`pending action decision failed: ${decide.status}`);
   }
 }
 
@@ -130,7 +182,33 @@ const add = await client.fetchProtected(site, {
 });
 printOutcome(add.status, add.error?.code, '');
 
-step('5', 'action outside granted scope (order.read was not granted)');
+step('5', 'approval-gated checkout: agent queues, human approves on the site');
+const queued = await client.fetchProtected(site, {
+  method: 'POST',
+  target: '/api/cart/checkout',
+  body: '{}',
+});
+printOutcome(
+  queued.status,
+  queued.error?.code,
+  queued.receipt?.verified === true ? 'verified pending receipt' : '',
+);
+const actionId = queued.pending?.id as string;
+ok('queued', `${actionId}  review: ${HTTP_BASE}/account/approvals/${actionId}`);
+if (MANUAL) {
+  console.log('   approve it in the browser; polling status...');
+} else {
+  console.log('   auto-approving through the real approvals page...');
+  await approveActionViaBrowserPath(actionId);
+}
+let checkoutStatus = await client.actionStatus(site, actionId, { grantId: grant.jti });
+for (let i = 0; i < 120 && checkoutStatus.status === 'pending'; i += 1) {
+  await new Promise((r) => setTimeout(r, 1000));
+  checkoutStatus = await client.actionStatus(site, actionId, { grantId: grant.jti });
+}
+ok('action status', `${checkoutStatus.status}  result=${checkoutStatus.result?.status}`);
+
+step('6', 'action outside granted scope (order.read was not granted)');
 const outOfScope = await client.fetchProtected(site, { method: 'GET', target: '/api/orders' });
 printOutcome(
   outOfScope.status,
@@ -138,14 +216,14 @@ printOutcome(
   outOfScope.receipt?.verified === true ? 'denial receipt verified' : '',
 );
 
-step('6', "another user's resource (order:ord_bill_seed01 is IN scope but owned by usr_bill)");
+step('7', "another user's resource (order:ord_bill_seed01 is IN scope but owned by usr_bill)");
 const crossUser = await client.fetchProtected(site, {
   method: 'GET',
   target: '/api/orders/ord_bill_seed01',
 });
 printOutcome(crossUser.status, crossUser.error?.code, '');
 
-step('7', 'tampered request body (signature/digest no longer matches)');
+step('8', 'tampered request body (signature/digest no longer matches)');
 // Corrupt the body bytes in-flight: the signature and Content-Digest were
 // computed over the original body, so verification must fail server-side.
 const origSend = transport.send.bind(transport);
@@ -161,7 +239,7 @@ const tamperedRes = await client.fetchProtected(site, {
 transport.send = origSend;
 printOutcome(tamperedRes.status, tamperedRes.error?.code, '');
 
-step('8', 'charge above the authorized max_amount');
+step('9', 'charge above the authorized max_amount');
 const bigAdd = await client.fetchProtected(site, {
   method: 'POST',
   target: '/api/cart/items',
@@ -185,7 +263,7 @@ printOutcome(
   bigPay.receipt?.verified === true ? 'denial receipt verified' : '',
 );
 
-step('9', 'duplicate checkout (idempotency) and concurrent spending');
+step('10', 'duplicate checkout (idempotency) and concurrent spending');
 const cart2 = await client.fetchProtected(site, {
   method: 'POST',
   target: '/api/cart/items',
@@ -225,7 +303,7 @@ const [pay1, pay2] = await Promise.all([
 printOutcome(pay1.status, pay1.error?.code, '');
 printOutcome(pay2.status, pay2.error?.code, '');
 
-step('10', 'revocation');
+step('11', 'revocation');
 const cookie = (
   await fetch(`${HTTP_BASE}/login`, {
     method: 'POST',
@@ -255,7 +333,7 @@ ok('revoke', `HTTP ${revoke.status}`);
 const after = await client.fetchProtected(site, { method: 'GET', target: '/api/cart' });
 printOutcome(after.status, after.error?.code, '');
 
-step('11', 'activity records + a legitimate receipt');
+step('12', 'activity records + a legitimate receipt');
 const receiptsPage = await fetch(`${HTTP_BASE}/account/receipts`, { headers: { cookie } });
 ok('receipts page', `HTTP ${receiptsPage.status}`);
 const goodReceipt = cat.receipt?.verified === true ? cat.receipt.payload : undefined;
@@ -266,7 +344,7 @@ if (goodReceipt !== undefined) {
   );
 }
 
-step('12', 'tampered receipt (verification must fail)');
+step('13', 'tampered receipt (verification must fail)');
 const jws = cat.headers?.['trailgate-receipt'] ?? '';
 const forged = `${jws.slice(0, -4)}AAAA`;
 try {

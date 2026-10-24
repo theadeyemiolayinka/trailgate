@@ -64,7 +64,7 @@ export interface IssueReceiptInput {
   audience: string;
   grantId: string;
   signatureBase: string;
-  decision: 'allowed' | 'denied';
+  decision: 'allowed' | 'denied' | 'pending';
   code?: string;
   amounts?: { reserved?: Money; consumed?: Money; released?: Money };
   auditId: string;

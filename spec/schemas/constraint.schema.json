@@ -73,6 +73,27 @@
         },
         "required": ["params"]
       }
+    },
+    {
+      "if": { "properties": { "type": { "const": "require_approval" } } },
+      "then": {
+        "properties": {
+          "params": {
+            "type": "object",
+            "required": ["permissions"],
+            "properties": {
+              "permissions": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1,
+                "uniqueItems": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": ["params"]
+      }
     }
   ],
   "$defs": {

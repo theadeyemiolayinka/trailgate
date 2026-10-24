@@ -115,5 +115,12 @@ export interface VerifiedRequestContext {
 }
 
 export interface SitePolicy {
-  authorize(context: VerifiedRequestContext): Promise<void>;
+  /**
+   * Stage 13 site rule. Throw `tg.authorization.denied` (or return 'deny')
+   * to refuse the request. Return 'require_approval' to allow submission
+   * but require a human decision before execution: the request is then
+   * queued as a pending action instead of running (spec section 12.5).
+   * Return undefined or 'allow' to let the request execute.
+   */
+  authorize(context: VerifiedRequestContext): Promise<void | 'allow' | 'deny' | 'require_approval'>;
 }

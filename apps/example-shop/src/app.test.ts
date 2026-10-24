@@ -455,3 +455,258 @@ test('spending policy: cumulative budgets are tightened to the site ceiling', as
     app.tg.spendingPolicy.maxGrantBudget.amount,
   );
 });
+
+test('agent approval flow: checkout queues, human decides, status reports the outcome', async () => {
+  const app = makeApp();
+  const db = appDb(app);
+  const transport = inProcessTransport(app);
+  const client = createAgentClient({ transport });
+  client.useKey(SoftwareKeyProvider.generate());
+  const site = await client.discover(ISSUER);
+  const { cookie, csrf } = await login(app);
+
+  const session = await client.requestGrant(site, {
+    permissions: [
+      'tg.cart.read',
+      'tg.cart.write',
+      'tg.order.create',
+      'tg.order.read',
+      'tg.wallet.read',
+      'tg.wallet.charge',
+    ],
+    resources: ['cart:cart_usr_demo', 'wallet:wlt_usr_demo'],
+    constraints: [],
+  });
+  await app.tg.tg.decideConsent(session.requestId, 'approve', 'usr_demo');
+  const grant = await client.awaitApproval(session.requestId, { intervalMs: 10 });
+
+  // Arbitrary valid quantities land; quantities over stock fail with an error.
+  const add = await client.fetchProtected(site, {
+    method: 'POST',
+    grantId: grant.jti,
+    target: '/api/cart/items',
+    body: JSON.stringify({ sku: 'drk-mug-01', qty: 4 }),
+  });
+  assert.equal(add.status, 200);
+  const overStock = await client.fetchProtected(site, {
+    method: 'POST',
+    grantId: grant.jti,
+    target: '/api/cart/items',
+    body: JSON.stringify({ sku: 'hm-throw-01', qty: 50 }),
+  });
+  assert.equal(overStock.status, 400);
+  const overBody = JSON.parse(new TextDecoder().decode(overStock.body)) as {
+    error: { code: string };
+  };
+  assert.equal(overBody.error.code, 'shop.cart.invalid');
+
+  // Checkout is approval-gated: the call queues instead of executing.
+  const walletBefore = getWallet(db, 'usr_demo').balance.amount;
+  const queued = await client.fetchProtected(site, {
+    method: 'POST',
+    grantId: grant.jti,
+    target: '/api/cart/checkout',
+    body: '{}',
+  });
+  assert.equal(queued.status, 202);
+  assert.equal(queued.pending?.status, 'pending');
+  const actionId = queued.pending?.id as string;
+  assert.ok(actionId.startsWith('pact_'));
+  assert.equal(getWallet(db, 'usr_demo').balance.amount, walletBefore);
+  const ordersBefore = db
+    .prepare('SELECT COUNT(*) AS n FROM orders WHERE user_id = ?')
+    .get('usr_demo') as { n: number };
+
+  // The agent can poll the signed status endpoint while it waits.
+  const waiting = await client.actionStatus(site, actionId, { grantId: grant.jti });
+  assert.equal(waiting.status, 'pending');
+
+  // A human reviews and approves on the site's own page.
+  const review = await get(app, `/account/approvals/${actionId}`, { cookie });
+  assert.equal(review.status, 200);
+  assert.ok(text(review).includes('Check out the cart'));
+  const decide = await post(
+    app,
+    '/account/approvals/decide',
+    { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    formBody({ _csrf: csrf, action_id: actionId, decision: 'approve' }),
+  );
+  assert.equal(decide.status, 303);
+
+  const done = await client.actionStatus(site, actionId, { grantId: grant.jti });
+  assert.equal(done.status, 'succeeded');
+  assert.equal(done.result?.status, 201);
+
+  const ordersAfter = db
+    .prepare('SELECT COUNT(*) AS n FROM orders WHERE user_id = ?')
+    .get('usr_demo') as { n: number };
+  assert.equal(ordersAfter.n, ordersBefore.n + 1);
+  // 4 mugs at 2400 minor each.
+  assert.equal(getWallet(db, 'usr_demo').balance.amount, walletBefore - 9600);
+});
+
+test('tri-state consent: deny, require approval, and allow are enforced live', async () => {
+  const app = makeApp();
+  const transport = inProcessTransport(app);
+  const client = createAgentClient({ transport });
+  client.useKey(SoftwareKeyProvider.generate());
+  const site = await client.discover(ISSUER);
+  const { cookie, csrf } = await login(app);
+
+  const session = await client.requestGrant(site, {
+    permissions: [
+      'tg.catalog.read',
+      'tg.cart.read',
+      'tg.cart.write',
+      'tg.order.create',
+      'tg.order.read',
+      'tg.wallet.read',
+      'tg.wallet.charge',
+    ],
+    resources: ['cart:cart_usr_demo', 'wallet:wlt_usr_demo'],
+    constraints: [],
+  });
+
+  // The consent page renders a tri-state selector per permission; the
+  // approval-gated checkout route pre-selects "require approval".
+  const consentPage = await get(
+    app,
+    `/tg/consent?request_id=${encodeURIComponent(session.requestId)}`,
+    { cookie },
+  );
+  const page = text(consentPage);
+  assert.ok(page.includes('name="mode_tg.cart.read"'));
+  assert.ok(page.includes('name="mode_tg.wallet.charge" value="approval" checked'));
+
+  // The user allows most, marks cart writes approval-only, denies wallet.
+  const decide = new URLSearchParams({
+    _csrf: csrf,
+    request_id: session.requestId,
+    decision: 'approve',
+  });
+  for (const [perm, mode] of [
+    ['tg.catalog.read', 'allow'],
+    ['tg.cart.read', 'allow'],
+    ['tg.cart.write', 'approval'],
+    ['tg.order.create', 'allow'],
+    ['tg.order.read', 'allow'],
+    ['tg.wallet.read', 'deny'],
+    ['tg.wallet.charge', 'deny'],
+  ] as const) {
+    decide.append(`mode_${perm}`, mode);
+  }
+  const decided = await post(
+    app,
+    '/tg/consent/decide',
+    { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    decide.toString(),
+  );
+  assert.equal(decided.status, 303);
+  const grant = await client.awaitApproval(session.requestId, { intervalMs: 10 });
+
+  // The marks persisted into the grant's effective scope.
+  const scope = await app.tg.tg.config.stores.grants.currentScope(grant.jti);
+  assert.ok(scope !== undefined);
+  assert.deepEqual(
+    scope.permissions.includes('tg.wallet.charge'),
+    false,
+    'denied permission is absent',
+  );
+  const approvalConstraint = (scope.constraints ?? []).find((c) => c.type === 'require_approval');
+  assert.deepEqual(approvalConstraint?.params?.permissions, ['tg.cart.write']);
+
+  // allow: reads execute immediately.
+  const read = await client.fetchProtected(site, {
+    method: 'GET',
+    grantId: grant.jti,
+    target: '/api/cart',
+  });
+  assert.equal(read.status, 200);
+
+  // require approval: writes queue a pending action and do not execute.
+  const queued = await client.fetchProtected(site, {
+    method: 'POST',
+    grantId: grant.jti,
+    target: '/api/cart/items',
+    body: JSON.stringify({ sku: 'drk-mug-01', qty: 1 }),
+  });
+  assert.equal(queued.status, 202);
+  assert.equal(queued.pending?.status, 'pending');
+  const actionId = queued.pending?.id as string;
+  let cart = await client.fetchProtected(site, {
+    method: 'GET',
+    grantId: grant.jti,
+    target: '/api/cart',
+  });
+  assert.equal(
+    (JSON.parse(new TextDecoder().decode(cart.body)) as { items: unknown[] }).items.length,
+    0,
+  );
+
+  // deny: wallet operations are refused outright, no pending record.
+  const denied = await client.fetchProtected(site, {
+    method: 'GET',
+    grantId: grant.jti,
+    target: '/api/wallet',
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.error?.code, Codes.REQUEST_PERMISSION_DENIED);
+
+  // The human approves the queued write and it executes.
+  const review = await post(
+    app,
+    '/account/approvals/decide',
+    { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    formBody({ _csrf: csrf, action_id: actionId, decision: 'approve' }),
+  );
+  assert.equal(review.status, 303);
+  const done = await client.actionStatus(site, actionId, { grantId: grant.jti });
+  assert.equal(done.status, 'succeeded');
+  cart = await client.fetchProtected(site, {
+    method: 'GET',
+    grantId: grant.jti,
+    target: '/api/cart',
+  });
+  assert.equal(
+    (JSON.parse(new TextDecoder().decode(cart.body)) as { items: unknown[] }).items.length,
+    1,
+  );
+
+  // Post-issuance: the connections editor flips cart.write to allow and
+  // cart.read to deny; changes apply on the agent's next request.
+  const edit = new URLSearchParams({ _csrf: csrf });
+  for (const [perm, mode] of [
+    ['tg.catalog.read', 'deny'],
+    ['tg.cart.read', 'deny'],
+    ['tg.cart.write', 'allow'],
+    ['tg.order.create', 'allow'],
+    ['tg.order.read', 'allow'],
+    ['tg.wallet.read', 'deny'],
+    ['tg.wallet.charge', 'deny'],
+  ] as const) {
+    edit.append(`mode_${perm}`, mode);
+  }
+  const scoped = await post(
+    app,
+    `/account/connections/${grant.jti}/scope`,
+    { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    edit.toString(),
+  );
+  assert.equal(scoped.status, 303);
+
+  const readAgain = await client.fetchProtected(site, {
+    method: 'GET',
+    grantId: grant.jti,
+    target: '/api/cart',
+  });
+  assert.equal(readAgain.status, 403);
+  assert.equal(readAgain.error?.code, Codes.REQUEST_PERMISSION_DENIED);
+
+  const writeNow = await client.fetchProtected(site, {
+    method: 'POST',
+    grantId: grant.jti,
+    target: '/api/cart/items',
+    body: JSON.stringify({ sku: 'drk-mug-01', qty: 1 }),
+  });
+  assert.equal(writeNow.status, 200, 'allow executes without queueing');
+});

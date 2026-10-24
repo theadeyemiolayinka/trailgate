@@ -14,21 +14,45 @@
     "constraint_types"
   ],
   "properties": {
-    "version": { "type": "string", "enum": ["0.1"] },
+    "version": {
+      "type": "string",
+      "enum": ["0.1"]
+    },
     "protocol_versions": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "minItems": 1
     },
-    "issuer": { "type": "string", "pattern": "^https://" },
+    "issuer": {
+      "type": "string",
+      "pattern": "^https://"
+    },
     "endpoints": {
       "type": "object",
       "required": ["grant_request", "grant_redemption", "grant_status", "grant_revocation"],
       "properties": {
-        "grant_request": { "type": "string", "pattern": "^https://" },
-        "grant_redemption": { "type": "string", "pattern": "^https://" },
-        "grant_status": { "type": "string", "pattern": "^https://" },
-        "grant_revocation": { "type": "string", "pattern": "^https://" }
+        "grant_request": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "grant_redemption": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "grant_status": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "grant_revocation": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "action_status": {
+          "type": "string",
+          "pattern": "^https://"
+        }
       },
       "additionalProperties": false
     },
@@ -38,7 +62,9 @@
       "properties": {
         "keys": {
           "type": "array",
-          "items": { "$ref": "#/$defs/jwk" },
+          "items": {
+            "$ref": "#/$defs/jwk"
+          },
           "minItems": 1
         }
       },
@@ -46,29 +72,46 @@
     },
     "permissions": {
       "type": "array",
-      "items": { "$ref": "#/$defs/permission" }
+      "items": {
+        "$ref": "#/$defs/permission"
+      }
     },
     "constraint_types": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
     "capabilities": {
       "type": "object",
       "properties": {
-        "supports_redirect": { "type": "boolean" },
-        "supports_receipts_unsigned": { "type": "boolean" },
-        "max_grant_seconds": { "type": "integer", "minimum": 1 },
-        "rate_limits": { "type": "object" }
+        "supports_redirect": {
+          "type": "boolean"
+        },
+        "supports_receipts_unsigned": {
+          "type": "boolean"
+        },
+        "max_grant_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "rate_limits": {
+          "type": "object"
+        }
       },
       "additionalProperties": true
     },
     "actions": {
       "type": "array",
-      "items": { "$ref": "#/$defs/action" }
+      "items": {
+        "$ref": "#/$defs/action"
+      }
     },
     "critical": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Field names that must be understood; unknown members cause rejection (spec/protocol.md section 4)."
     }
   },
@@ -78,14 +121,39 @@
       "type": "object",
       "required": ["id", "method", "path", "permission", "description"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "method": { "type": "string", "pattern": "^[A-Z]+$" },
-        "path": { "type": "string", "pattern": "^/" },
-        "permission": { "$ref": "#/$defs/permission" },
-        "description": { "type": "string", "minLength": 1 },
-        "mutates": { "type": "boolean" },
-        "resource": { "type": "string", "minLength": 1 },
-        "spend": { "type": "boolean" }
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "method": {
+          "type": "string",
+          "pattern": "^[A-Z]+$"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "permission": {
+          "$ref": "#/$defs/permission"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mutates": {
+          "type": "boolean"
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1
+        },
+        "spend": {
+          "type": "boolean"
+        },
+        "approval_required": {
+          "type": "boolean",
+          "description": "True when this action queues for human approval instead of executing immediately."
+        }
       },
       "additionalProperties": true
     },
@@ -97,16 +165,39 @@
       "type": "object",
       "required": ["kty"],
       "properties": {
-        "kty": { "type": "string" },
-        "use": { "type": "string" },
-        "key_ops": { "type": "array", "items": { "type": "string" } },
-        "alg": { "type": "string" },
-        "kid": { "type": "string" },
-        "crv": { "type": "string" },
-        "x": { "type": "string" },
-        "y": { "type": "string" },
-        "n": { "type": "string" },
-        "e": { "type": "string" }
+        "kty": {
+          "type": "string"
+        },
+        "use": {
+          "type": "string"
+        },
+        "key_ops": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "alg": {
+          "type": "string"
+        },
+        "kid": {
+          "type": "string"
+        },
+        "crv": {
+          "type": "string"
+        },
+        "x": {
+          "type": "string"
+        },
+        "y": {
+          "type": "string"
+        },
+        "n": {
+          "type": "string"
+        },
+        "e": {
+          "type": "string"
+        }
       },
       "additionalProperties": true
     }

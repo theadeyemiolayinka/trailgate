@@ -16,7 +16,7 @@
       "properties": {
         "grant_id": { "type": "string", "minLength": 1 },
         "request_digest": { "type": "string", "minLength": 1 },
-        "decision": { "type": "string", "enum": ["allowed", "denied"] },
+        "decision": { "type": "string", "enum": ["allowed", "denied", "pending"] },
         "code": { "type": "string", "pattern": "^tg\\.[a-z0-9_]+(\\.[a-z0-9_]+)+$" },
         "amounts": {
           "type": "object",

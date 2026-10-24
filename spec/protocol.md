@@ -80,6 +80,7 @@ Schema: `spec/schemas/discovery.schema.json`. Required fields:
 | `grant_redemption` | POST redemption for an approved request. |
 | `grant_status` | GET grant status by `request_id` or grant `jti`. |
 | `grant_revocation` | POST revocation (site-side and user-initiated flows). |
+| `action_status` | GET pending-action status by action id (section 12.5). Optional; required when the site advertises any `approval_required` action. |
 
 Optional `capabilities` object: `supports_redirect` (boolean), `supports_receipts_unsigned` (boolean, default false), `max_grant_seconds` (integer ceiling on grant lifetime), `rate_limits` (site-wide defaults, informational).
 
@@ -95,6 +96,7 @@ Optional `actions` array: declarative descriptors of the site's protected routes
 | `mutates` | no | Whether the action changes state. When absent, agents MUST treat the action as mutating (the safe default). |
 | `resource` | no | Resource selector template the action touches (for example `cart:{user}`); `{user}` denotes the subject-derived part resolved at enforcement. |
 | `spend` | no | When true, the action may charge money, so spend constraints such as `max_amount`, `cumulative_budget`, or `spend_window` can deny it. |
+| `approval_required` | no | When true, submitting the action queues a pending action for human approval (section 12.5) instead of executing immediately. |
 
 ### 5.3 Origin rules
 
@@ -188,6 +190,7 @@ A constraint is `{ "type": "<name>", "params": { ... } }`. The `type` registry i
 | `valid_window` | `{ "not_before": int, "not_after": int }` | Requests outside `[not_before, not_after]` unix seconds are denied. Narrower than `exp`; both apply. |
 | `spend_window` | `{ "amount": int, "currency": "XXX", "window_seconds": int }` | The sum of consumed ledger entries in the last `window_seconds` (rolling) plus live reservations and this request MUST NOT exceed `amount` units. Enforced inside the atomic reservation check per section 12. |
 | `approval_threshold` | `{ "amount": int, "currency": "XXX" }` | A request carrying a metered amount above `amount` units MUST be denied with `tg.constraint.approval_required` until the grant subject records a per-operation human approval (section 12.4). A different unit code fails closed. |
+| `require_approval` | `{ "permissions": ["tg.x.y", ...] }` | Every request whose required permission is listed MUST queue as a pending action for a human decision instead of executing (section 12.5). This is the "require approval" state of the per-permission tri-state; "deny" is the permission being absent from the grant, and "allow" is its presence without the mark. The consent surface sets it; the agent never does. A queued human decision also covers `approval_threshold` for that operation. |
 
 `amount`/`currency` here is the generic metered quantity defined in section 3. A shop uses it for money (`USD`); an API gateway can use the same four constraints with a site-defined unit code to bound request counts (`XREQ`), token throughput (`XTOK`), or bytes (`XGB`) without any protocol change.
 
@@ -327,6 +330,18 @@ When a monetary request exceeds an `approval_threshold` constraint, the request 
 - A request whose handler fails or denies at the business layer releases the approval back to `approved`, so the human decision survives a retry of the same operation. An `Idempotency-Key` replay returns the stored outcome without consuming an approval.
 - Records, transitions, and decisions appear in the audit log as `request_approval.requested` and `request_approval.decided`.
 
+### 12.5 Pending actions (approval-gated operations)
+
+Authorization is tri-state. Beyond allow and deny, a route or the site policy MAY answer `require_approval`: the operation is permissible to propose but MUST NOT execute before a human decision. The user controls the third state per permission through the site's authenticated surfaces: the consent screen and the post-issuance scope editor offer deny / require approval / allow for every permission, persisted as grant scope (deny removes the permission; require approval adds a `require_approval` constraint naming it; allow is its unmarked presence). This section covers durable, action-level proposals; it is distinct from the exact-charge `approval_threshold` mechanism in section 12.4.
+
+- A verified request to an approval-gated route runs the full section 11 pipeline (signature, grant validity, permission, resource, constraints, policy). When it passes but the route, the policy, or a grant-scoped `require_approval` constraint requires approval, the site queues a pending action and answers `202` with `{ "status": "pending", "pending_action": { ... } }`. The `pending_action` object carries `id`, `action`, `status`, `summary`, `detail`, `request_digest`, `status_url`, and `review_url`. The response's receipt records decision `"pending"`. Queueing is a successful outcome, not an error: the agent treats `202` + `pending_action` as "awaiting a human decision".
+- The stored proposal is immutable: method, target URI, exact body bytes, resolved resource, resolved amount, and the operation digest (section 11.4). A byte-identical resubmission of a still-open proposal returns the existing action instead of queueing a duplicate; implementations MUST enforce this atomically on `(grant_id, operation_digest)` over the open states.
+- Nothing executes before approval. Only the grant's `sub` MAY decide, through the site's own authenticated surface, and only `pending` records are decidable; the decision transition MUST be atomic so exactly one decision wins.
+- States: `pending -> approved -> executing -> succeeded | failed`, or `pending -> rejected | expired | cancelled`. `approved`, `rejected`, and `expired` records carry `decided_at`/`decided_by`; terminal records carry the execution `result` for status lookups.
+- Approval executes the stored proposal through the site's registered handler for that action id, never through stored credentials, caller-supplied code, or arbitrary HTTP replay. At execution time the site MUST re-check the grant's current status, effective scope, resource ownership, and constraints: post-issuance scope narrowing, revocation, expiry, or a failing current authorization fails the action (`failed`) or cancels it (`cancelled`) instead of executing. Grant revocation cancels every open action under that grant.
+- `GET <endpoints.action_status>/{id}` is itself a protected request: the caller presents the grant the action was proposed under. Another grant's view of the action is `tg.action.unknown`. Responses are `cache-control: no-store` and carry the `pending_action` view including the execution `result` on terminal states.
+- Events appear in the audit log as `pending_action.queued`, `pending_action.decided`, `pending_action.executing`, `pending_action.succeeded`, `pending_action.failed`, `pending_action.expired`, and `pending_action.cancelled`.
+
 ## 13. Expiry, revocation, and rotation
 
 - `exp` is a hard stop: an expired grant is denied at enforcement with `tg.grant.expired`. Enforcement-time checks are authoritative; agents MUST NOT rely on cached validity.
@@ -352,8 +367,8 @@ Every protected request returns a receipt. The site MUST deliver the receipt in 
 | `iat` | Issuance time. |
 | `tg.grant_id` | The grant `jti` this receipt answers. |
 | `tg.request_digest` | base64url SHA-256 of the request's signature base (RFC 9421 signature base bytes), binding the receipt to that exact request. |
-| `tg.decision` | `"allowed"` or `"denied"`. |
-| `tg.code` | Error code if denied; omitted if allowed. |
+| `tg.decision` | `"allowed"`, `"denied"`, or `"pending"` (queued for human approval, section 12.5). |
+| `tg.code` | Error code if denied; omitted if allowed or pending. |
 | `tg.amounts` | Optional object `{ "reserved": money?, "consumed": money?, "released": money? }` summarizing ledger effects this request caused. Informational. |
 | `tg.audit_id` | The audit log event identifier for this request. |
 
@@ -387,6 +402,10 @@ The site records audit events for security-relevant transitions. Required event 
 | `idempotency.record_failed` | Outcome write failed after a successful claim; the pending record would answer `tg.request.idempotency_in_flight` to retries until reclaimed | `jti`, `detail` |
 | `request_approval.requested` | `approval_threshold` denial issued an approval record | `jti`, `detail.approval_id` |
 | `request_approval.decided` | User decision on a request approval | `jti`, `decision`, `sub`, `detail.approval_id` |
+| `pending_action.queued` | Approval-gated request stored | `jti`, `action_request_id`, `request_digest`, `detail.action_id` |
+| `pending_action.decided` | Human decision on a pending action | `jti`, `action_request_id`, `decision`, `actor` |
+| `pending_action.executing` | Approved action claimed for execution | `jti`, `action_request_id` |
+| `pending_action.succeeded`/`failed`/`expired`/`cancelled` | Terminal outcomes | `jti`, `action_request_id`, `reason?` |
 | `key.rotated` | Site or agent key rotation event | `old_jkt`, `new_jkt` |
 
 Events are append-only, timestamped, and retained per site policy. The audit mechanism itself is implementation-defined; the event vocabulary is the contract.

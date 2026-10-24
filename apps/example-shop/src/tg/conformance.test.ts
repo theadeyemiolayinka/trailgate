@@ -8,6 +8,7 @@ import {
   createGrantRequestStore,
   createIdempotencyStore,
   createNonceStore,
+  createPendingActionStore,
   createRateLimiter,
   createSpendingLedger,
 } from './stores.ts';
@@ -27,5 +28,6 @@ runPortContractSuite('example-shop sqlite stores', () => {
     rateLimiter: createRateLimiter(db),
     audit: createAuditSink(db),
     approvals: createApprovalStore(db),
+    pendingActions: createPendingActionStore(db),
   };
 });

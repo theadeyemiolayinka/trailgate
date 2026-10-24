@@ -35,7 +35,7 @@ export interface BuildReceiptInput {
   audience: string;
   grantId: string;
   signatureBase: string;
-  decision: 'allowed' | 'denied';
+  decision: 'allowed' | 'denied' | 'pending';
   code?: string;
   amounts?: { reserved?: Money; consumed?: Money; released?: Money };
   auditId: string;
@@ -50,7 +50,7 @@ export function buildReceiptPayload(input: BuildReceiptInput): ReceiptPayload {
     decision: input.decision,
     audit_id: input.auditId,
   };
-  if (input.decision === 'denied' && input.code !== undefined) {
+  if ((input.decision === 'denied' || input.decision === 'pending') && input.code !== undefined) {
     tg.code = input.code;
   }
   if (input.amounts !== undefined) {

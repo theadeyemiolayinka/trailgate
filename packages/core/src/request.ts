@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { evaluateConstraints } from './constraints.ts';
+import { evaluateConstraints, requireApprovalPermissions } from './constraints.ts';
 import { requestDigestOf, verifyContentDigest } from './digest.ts';
 import { Codes, TrailGateError } from './errors.ts';
 import { verifyGrant } from './grant.ts';
@@ -82,11 +82,24 @@ export interface RequestVerificationDeps {
    * `touchedResource`.
    */
   resolveTouchedResource?: (grant: GrantPayload) => string | undefined;
+  /**
+   * Set when the request is being queued through the pending-action flow
+   * (spec section 12.5) or executed from an approved pending action. The
+   * queued human decision covers `approval_threshold`, so those constraints
+   * are treated as satisfied.
+   */
+  skipApprovalThreshold?: boolean;
 }
 
 export interface RequestVerificationResult {
   grant: GrantPayload;
   requestDigest: string;
+  /**
+   * SHA-256 operation digest of (method, url, content-digest, grant jti):
+   * the identity an approved pending action must still produce when its
+   * stored proposal is replayed (spec sections 11.4, 12.5).
+   */
+  operationDigest: string;
   signatureBase: string;
   idempotentReplay: boolean;
   context: VerifiedRequestContext;
@@ -94,6 +107,12 @@ export interface RequestVerificationResult {
   requestAmount?: Money;
   /** The resource selector the request was checked against, when resolved. */
   touchedResource?: string;
+  /**
+   * Set when the site policy returned 'require_approval': the request may
+   * be submitted as a pending action but must not execute before a human
+   * decision (spec section 12.5).
+   */
+  policyDecision?: 'require_approval';
 }
 
 const REQUIRED_HEADERS = [
@@ -294,12 +313,26 @@ export async function verifyProtectedRequest(
     );
   }
 
+  // Per-permission tri-state (spec section 9): a `require_approval`
+  // constraint naming the required permission queues the operation for a
+  // human decision instead of executing. The queued approval covers
+  // `approval_threshold` for this request as well, so the threshold check
+  // is skipped the same way an approval-required route skips it.
+  const permissionRequiresApproval =
+    deps.requiredPermission !== undefined &&
+    effectiveConstraints.some((c) =>
+      requireApprovalPermissions(c).includes(deps.requiredPermission as string),
+    );
+
   const requestAmount = deps.resolveRequestAmount?.(grant) ?? deps.requestAmount;
   await evaluateConstraints(effectiveConstraints, {
     grantId: grant.jti,
     now: clock.now(),
     operationDigest,
     idempotentReplay,
+    ...(deps.skipApprovalThreshold === true || permissionRequiresApproval
+      ? { skipApprovalThreshold: true }
+      : {}),
     ...(deps.ledger !== undefined ? { ledger: deps.ledger } : {}),
     ...(deps.rateLimiter !== undefined ? { rateLimiter: deps.rateLimiter } : {}),
     ...(deps.approvals !== undefined ? { approvals: deps.approvals } : {}),
@@ -316,9 +349,18 @@ export async function verifyProtectedRequest(
     requestDigest,
     ...(grant.sub !== undefined ? { subject: grant.sub } : {}),
   };
+  let policyDecision: 'require_approval' | undefined = permissionRequiresApproval
+    ? 'require_approval'
+    : undefined;
   if (deps.policy !== undefined) {
     try {
-      await deps.policy.authorize(context);
+      const decision = await deps.policy.authorize(context);
+      if (decision === 'deny') {
+        throw new TrailGateError(Codes.AUTHORIZATION_DENIED, 'site policy denied the request');
+      }
+      if (decision === 'require_approval') {
+        policyDecision = 'require_approval';
+      }
     } catch (err) {
       if (err instanceof TrailGateError) {
         throw err;
@@ -330,10 +372,12 @@ export async function verifyProtectedRequest(
   return {
     grant,
     requestDigest,
+    operationDigest,
     signatureBase,
     idempotentReplay,
     context,
     ...(requestAmount !== undefined ? { requestAmount } : {}),
     ...(touchedResource !== undefined ? { touchedResource } : {}),
+    ...(policyDecision !== undefined ? { policyDecision } : {}),
   };
 }

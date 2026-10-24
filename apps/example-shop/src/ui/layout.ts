@@ -171,13 +171,28 @@ export function statusBadge(status: string): string {
     revoked: 'Revoked',
     allow: 'Allowed',
     deny: 'Denied',
+    executing: 'Executing',
+    succeeded: 'Succeeded',
+    failed: 'Failed',
+    rejected: 'Rejected',
   };
   const tone =
-    status === 'paid' || status === 'active' || status === 'approved' || status === 'allow'
+    status === 'paid' ||
+    status === 'active' ||
+    status === 'approved' ||
+    status === 'allow' ||
+    status === 'succeeded'
       ? 'ok'
-      : status === 'awaiting_payment' || status === 'pending' || status === 'issued'
+      : status === 'awaiting_payment' ||
+          status === 'pending' ||
+          status === 'issued' ||
+          status === 'executing'
         ? 'warn'
-        : status === 'denied' || status === 'deny' || status === 'revoked'
+        : status === 'denied' ||
+            status === 'deny' ||
+            status === 'revoked' ||
+            status === 'failed' ||
+            status === 'rejected'
           ? 'bad'
           : 'muted';
   return `<span class="badge badge-${tone}">${esc(map[status] ?? status)}</span>`;

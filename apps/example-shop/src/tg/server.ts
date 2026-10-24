@@ -14,6 +14,7 @@ import {
   createGrantRequestStore,
   createIdempotencyStore,
   createNonceStore,
+  createPendingActionStore,
   createRateLimiter,
   createSpendingLedger,
 } from './stores.ts';
@@ -106,6 +107,7 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
       rateLimiter: createRateLimiter(db),
       audit,
       approvals: createApprovalStore(db),
+      pendingActions: createPendingActionStore(db),
     },
     subjectFor: (userId) => userId,
     bindSubjectResources: (resources, subject) => bindShopSelectors(resources, subject),

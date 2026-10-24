@@ -13,6 +13,7 @@ import {
   createGrantRequestStore,
   createIdempotencyStore,
   createNonceStore,
+  createPendingActionStore,
   createRateLimiter,
 } from './stores.ts';
 import { bindBlogSelectors, isBlogSelector, PERMISSIONS } from './vocabulary.ts';
@@ -90,6 +91,7 @@ export function createBlogTrailGate(db: Db, config: BlogConfig): BlogTrailGate {
       rateLimiter: createRateLimiter(db),
       audit,
       approvals: createApprovalStore(db),
+      pendingActions: createPendingActionStore(db),
     },
     subjectFor: (userId) => userId,
     bindSubjectResources: (resources, subject) =>

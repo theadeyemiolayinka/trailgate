@@ -42,6 +42,8 @@ Every error response uses the envelope in `spec/schemas/error.schema.json`:
 | `tg.constraint.unknown_type` | 403 | Constraint type in the grant is not evaluable | Site bug; grant should never have been issued |
 | `tg.constraint.approval_required` | 403 | `approval_threshold` exceeded; `detail.approval_url` names the site decision surface when issued | Present the URL to the user; after approval, retry the identical request |
 | `tg.authorization.denied` | 403 | Site business rules or user authorization deny the action | Stop; TrailGate does not override site policy |
+| `tg.action.unknown` | 404 | The pending action id is unknown or belongs to a different grant | Stop; the id or grant is wrong |
+| `tg.action.state_invalid` | 409 | The pending action is not in a state that allows the requested transition (decided, expired, cancelled) | Poll `action_status`; do not retry the transition |
 | `tg.internal.unavailable` | 503 | A security-critical dependency was unavailable; request denied | Retry with backoff; fail closed on the client too |
 | `tg.internal.error` | 500 | Unclassified server failure | Retry with backoff; report if persistent |
 

@@ -30,6 +30,8 @@ export const Codes = {
   CONSTRAINT_UNKNOWN_TYPE: 'tg.constraint.unknown_type',
   CONSTRAINT_APPROVAL_REQUIRED: 'tg.constraint.approval_required',
   AUTHORIZATION_DENIED: 'tg.authorization.denied',
+  ACTION_UNKNOWN: 'tg.action.unknown',
+  ACTION_STATE_INVALID: 'tg.action.state_invalid',
   INTERNAL_UNAVAILABLE: 'tg.internal.unavailable',
   INTERNAL_ERROR: 'tg.internal.error',
 } as const;
@@ -66,6 +68,8 @@ const HTTP_STATUS: Record<RegisteredCode, number> = {
   'tg.constraint.unknown_type': 403,
   'tg.constraint.approval_required': 403,
   'tg.authorization.denied': 403,
+  'tg.action.unknown': 404,
+  'tg.action.state_invalid': 409,
   'tg.internal.unavailable': 503,
   'tg.internal.error': 500,
 };

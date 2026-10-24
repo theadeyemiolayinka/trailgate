@@ -59,9 +59,21 @@ async function consentViaBrowserPath(requestId: string, perms: string[]): Promis
   if (csrf === undefined) {
     throw new Error('consent page did not render a CSRF token');
   }
+  // The consent form renders a tri-state radio per permission
+  // (`mode_<perm>` = allow|approval|deny); submit the page's checked
+  // defaults, which mark site-suggested permissions as approval.
   const body = new URLSearchParams({ _csrf: csrf, request_id: requestId, decision: 'approve' });
-  for (const p of perms) {
-    body.append('perm', p);
+  const groups = [
+    ...new Set([...html.matchAll(/name="mode_([^"]+)"/g)].map((m) => m[1] as string)),
+  ].filter((p) => perms.includes(p));
+  if (groups.length === 0) {
+    throw new Error('consent page rendered no permission controls');
+  }
+  for (const perm of groups) {
+    const checked = html.match(
+      new RegExp(`name="mode_${perm.replace(/\./g, '\\.')}" value="([^"]+)" checked`),
+    );
+    body.append(`mode_${perm}`, checked?.[1] ?? 'allow');
   }
   const decide = await fetch(`${HTTP_BASE}/tg/consent`, {
     method: 'POST',
@@ -71,6 +83,28 @@ async function consentViaBrowserPath(requestId: string, perms: string[]): Promis
   });
   if (decide.status !== 303 && decide.status !== 200) {
     throw new Error(`consent decision failed: ${decide.status}`);
+  }
+}
+
+/** Approves a pending action through the real workspace approvals page. */
+async function approveActionViaBrowserPath(actionId: string): Promise<void> {
+  const cookie = await loginCookie();
+  const page = await fetch(`${HTTP_BASE}/workspace/approvals/${actionId}`, {
+    headers: { cookie },
+  });
+  const html = await page.text();
+  const csrf = html.match(/name="_csrf" value="([^"]+)"/)?.[1];
+  if (csrf === undefined) {
+    throw new Error('approvals page did not render a CSRF token');
+  }
+  const res = await fetch(`${HTTP_BASE}/workspace/approvals/decide`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ _csrf: csrf, action_id: actionId, decision: 'approve' }).toString(),
+    redirect: 'manual',
+  });
+  if (res.status !== 303 && res.status !== 200) {
+    throw new Error(`pending action decision failed: ${res.status}`);
   }
 }
 
@@ -177,7 +211,7 @@ if (MANUAL) {
 const grant2 = await client.awaitApproval(session2.requestId, { intervalMs: 50 });
 ok('grant', grant2.jti);
 
-step('7', 'publish now succeeds');
+step('7', 'publish is approval-gated: the call queues, a human approves, then it runs');
 const published = await client.fetchProtected(site, {
   method: 'POST',
   grantId: grant2.jti,
@@ -188,9 +222,21 @@ printOutcome(
   published.error?.code,
   published.receipt?.verified === true ? 'verified' : '',
 );
-const pubPost = JSON.parse(new TextDecoder().decode(published.body ?? new Uint8Array())) as {
-  post?: { slug: string };
-};
+const actionId = published.pending?.id as string;
+ok('queued', `${actionId}  review: ${HTTP_BASE}/workspace/approvals/${actionId}`);
+if (MANUAL) {
+  console.log('   approve it in the browser; polling status...');
+} else {
+  console.log('   auto-approving through the real approvals page...');
+  await approveActionViaBrowserPath(actionId);
+}
+let actionStatus = await client.actionStatus(site, actionId, { grantId: grant2.jti });
+for (let i = 0; i < 120 && actionStatus.status === 'pending'; i += 1) {
+  await new Promise((r) => setTimeout(r, 1000));
+  actionStatus = await client.actionStatus(site, actionId, { grantId: grant2.jti });
+}
+ok('action status', `${actionStatus.status}  result=${actionStatus.result?.status}`);
+const pubPost = (actionStatus.result?.body ?? {}) as { post?: { slug: string } };
 ok('live', `${HTTP_BASE}/post/${pubPost.post?.slug}`);
 
 step('8', 'disable comments through tg.posts.settings');

@@ -1,3 +1,5 @@
+import type { Constraint } from '@trailgate/core';
+import { requireApprovalPermissions } from '@trailgate/core';
 import type { Comment } from '../domain/comments.ts';
 import type { Notification } from '../domain/notifications.ts';
 import type { Post } from '../domain/posts.ts';
@@ -6,7 +8,7 @@ import { PERMISSION_LABELS } from '../tg/vocabulary.ts';
 import { esc, formatDate, formatTime } from './html.ts';
 import { renderMarkdown } from './markdown.ts';
 
-const AVATAR_COLORS = ['#2563eb', '#7c3aed', '#0891b2', '#be185d', '#b45309', '#15803d'];
+const AVATAR_COLORS = ['#1f4d3a', '#5b3a86', '#2b5d74', '#8a3550', '#8a6420', '#2f6a3c'];
 
 function avatar(name: string, image: string, size = 36): string {
   if (image !== '') {
@@ -28,17 +30,21 @@ export function postCard(post: Post, author?: User, featured = false): string {
     post.coverImage !== ''
       ? `<div class="card-cover"><img src="${esc(post.coverImage)}" alt=""></div>`
       : '';
+  const kicker = [
+    post.tags[0] !== undefined ? esc(post.tags[0]) : undefined,
+    post.publishedAt !== undefined ? formatDate(post.publishedAt) : undefined,
+  ]
+    .filter((part) => part !== undefined)
+    .join(' &middot; ');
   return `
-  <article class="post-card${featured ? ' post-card-featured' : ''}">
+  <article class="post-card${featured ? ' post-card-featured lead-story' : ''}">
+    ${kicker !== '' ? `<p class="card-kicker">${kicker}</p>` : ''}
+    <h${featured ? '1' : '2'} class="card-title"><a href="/post/${esc(post.slug)}">${esc(post.title)}</a></h${featured ? '1' : '2'}>
+    ${post.excerpt !== '' ? `<p class="card-excerpt">${esc(post.excerpt)}</p>` : ''}
     ${cover}
-    <div class="card-body">
-      <div class="card-tags">${tagList(post.tags)}</div>
-      <h${featured ? '1' : '2'} class="card-title"><a href="/post/${esc(post.slug)}">${esc(post.title)}</a></h${featured ? '1' : '2'}>
-      ${post.excerpt !== '' ? `<p class="card-excerpt">${esc(post.excerpt)}</p>` : ''}
-      <div class="card-meta">
-        ${author !== undefined ? `${avatar(author.name, author.avatar, 28)}<span>${esc(author.name)}</span>` : ''}
-        <span>${post.publishedAt !== undefined ? formatDate(post.publishedAt) : ''}</span>
-      </div>
+    <div class="card-meta">
+      ${author !== undefined ? `${avatar(author.name, author.avatar, 26)}<span>${esc(author.name)}</span>` : ''}
+      ${post.tags.length > 1 ? `<span class="card-tags">${tagList(post.tags.slice(1))}</span>` : ''}
     </div>
   </article>`;
 }
@@ -108,7 +114,7 @@ export function renderArticle(
   return `
   <article class="article">
     <header class="article-head">
-      <div class="card-tags">${tagList(post.tags)}</div>
+      ${post.tags[0] !== undefined ? `<p class="eyebrow">${esc(post.tags[0])}${post.tags.length > 1 ? ` &middot; ${post.tags.slice(1).map(esc).join(', ')}` : ''}</p>` : ''}
       <h1>${esc(post.title)}</h1>
       ${post.excerpt !== '' ? `<p class="article-excerpt">${esc(post.excerpt)}</p>` : ''}
       <div class="article-meta">
@@ -129,6 +135,7 @@ export function renderAuth(
   const isLogin = kind === 'login';
   return `
   <section class="auth-card">
+    <p class="eyebrow">${isLogin ? 'Sign in' : 'Join'}</p>
     <h1>${isLogin ? 'Welcome back' : 'Create your account'}</h1>
     <p class="muted">${isLogin ? 'Sign in to your writing workspace.' : 'Start publishing on Blogarithm.'}</p>
     ${error !== undefined ? `<div class="flash flash-error">${esc(error)}</div>` : ''}
@@ -160,7 +167,7 @@ export function renderOverview(
 ): string {
   return `
   <div class="page-head">
-    <div><h1>Good ${new Date().getUTCHours() < 12 ? 'morning' : new Date().getUTCHours() < 18 ? 'afternoon' : 'evening'}, ${esc(user.name.split(' ')[0] ?? user.name)}</h1>
+    <div><p class="eyebrow">Workspace</p><h1>Good ${new Date().getUTCHours() < 12 ? 'morning' : new Date().getUTCHours() < 18 ? 'afternoon' : 'evening'}, ${esc(user.name.split(' ')[0] ?? user.name)}</h1>
     <p class="muted">Here is what is happening on your blog.</p></div>
     <a class="btn btn-primary" href="/workspace/posts/new">New post</a>
   </div>
@@ -224,7 +231,7 @@ export function renderPostsList(
     })
     .join('');
   return `
-  <div class="page-head"><h1>Posts</h1><a class="btn btn-primary" href="/workspace/posts/new">New post</a></div>
+  <div class="page-head"><div><p class="eyebrow">Workspace</p><h1>Posts</h1></div><a class="btn btn-primary" href="/workspace/posts/new">New post</a></div>
   <div class="toolbar">
     <div class="tabs">${tabs}</div>
     <form method="get" action="/workspace/posts" class="search-form">
@@ -271,7 +278,7 @@ export function renderEditor(post: Post | undefined, csrf: string): string {
   const body = p.body ?? '';
   return `
   <div class="page-head">
-    <div><a class="muted" href="/workspace/posts">&larr; Posts</a>
+    <div><p class="eyebrow"><a class="muted" href="/workspace/posts">Posts</a> / ${isNew ? 'Draft' : esc(p.status ?? 'draft')}</p>
     <h1>${isNew ? 'New post' : 'Edit post'}</h1></div>
     <div class="row-ops">
       ${!isNew && post.status === 'draft' ? `<form method="post" action="/workspace/posts/${esc(id)}/publish" class="inline-form"><input type="hidden" name="_csrf" value="${esc(csrf)}"><button class="btn btn-primary" type="submit">Publish</button></form>` : ''}
@@ -307,7 +314,7 @@ export function renderCommentsPage(
   csrf: string,
 ): string {
   return `
-  <div class="page-head"><h1>Comments</h1></div>
+  <div class="page-head"><div><p class="eyebrow">Workspace</p><h1>Comments</h1></div></div>
   ${
     items.length === 0
       ? '<p class="muted">No comments on your posts yet.</p>'
@@ -328,7 +335,7 @@ export function renderCommentsPage(
 
 export function renderNotificationsPage(notifications: Notification[], csrf: string): string {
   return `
-  <div class="page-head"><h1>Notifications</h1>
+  <div class="page-head"><div><p class="eyebrow">Workspace</p><h1>Notifications</h1></div>
     <form method="post" action="/workspace/notifications/read-all" class="inline-form">
       <input type="hidden" name="_csrf" value="${esc(csrf)}">
       <button class="btn" type="submit">Mark all read</button></form></div>
@@ -355,7 +362,7 @@ export function renderNotificationsPage(notifications: Notification[], csrf: str
 
 export function renderSettings(user: User, csrf: string): string {
   return `
-  <div class="page-head"><h1>Settings</h1></div>
+  <div class="page-head"><div><p class="eyebrow">Workspace</p><h1>Settings</h1></div></div>
   <section class="settings-card">
     <h2 class="section-title">Profile</h2>
     <form method="post" action="/workspace/settings" class="form">
@@ -373,15 +380,47 @@ interface GrantView {
   jti: string;
   agentJkt: string;
   permissions: string[];
+  constraints: Constraint[];
   issuedAt: number;
   expiresAt: number;
   status: string;
+}
+
+/**
+ * Post-issuance tri-state editor (spec sections 9 and 13): every advertised
+ * permission can be denied, allowed, or set to require a human decision on
+ * each action. Only the site can change a grant's scope; the agent can
+ * never modify its own.
+ */
+function grantScopeEditor(g: GrantView, csrf: string): string {
+  const effective = new Set(g.permissions);
+  const approvalSet = new Set(g.constraints.flatMap((c) => requireApprovalPermissions(c)));
+  const rows = Object.keys(PERMISSION_LABELS)
+    .map((p) => {
+      const mode = !effective.has(p) ? 'deny' : approvalSet.has(p) ? 'approval' : 'allow';
+      const radio = (value: string, text: string) =>
+        `<label class="check"><input type="radio" name="mode_${esc(p)}" value="${value}"${mode === value ? ' checked' : ''}> ${esc(text)}</label>`;
+      return `<li class="perm-item perm-${PERMISSION_LABELS[p]?.risk ?? 'read'}">
+        <span>${esc(PERMISSION_LABELS[p]?.label ?? p)}</span>
+        <span class="row-ops">${radio('allow', 'Allow')}${radio('approval', 'Require approval')}${radio('deny', 'Deny')}</span></li>`;
+    })
+    .join('');
+  return `<details class="scope-editor">
+    <summary>Change permissions</summary>
+    <p class="muted">Allow runs the action. Require approval queues each action for your review first. Deny removes the permission. Changes apply to the agent's next request; to remove all access, revoke.</p>
+    <form method="post" action="/workspace/access/${esc(g.jti)}/scope" class="form">
+      <input type="hidden" name="_csrf" value="${esc(csrf)}">
+      <ul class="perm-items">${rows}</ul>
+      <button class="btn btn-small" type="submit">Save permissions</button>
+    </form>
+  </details>`;
 }
 
 export function renderAccessPage(grants: GrantView[], csrf: string, now: number): string {
   const rows = grants.map((g) => {
     const expired = g.expiresAt <= now;
     const status = g.status === 'revoked' ? 'revoked' : expired ? 'expired' : 'active';
+    const editor = status === 'active' ? grantScopeEditor(g, csrf) : '';
     return `<li class="row row-actions">
       <span>
         <strong>Agent ${esc(g.agentJkt.slice(0, 12))}&hellip;</strong>
@@ -389,6 +428,7 @@ export function renderAccessPage(grants: GrantView[], csrf: string, now: number)
         <span class="perm-list">${g.permissions
           .map((p) => `<span class="perm">${esc(PERMISSION_LABELS[p]?.label ?? p)}</span>`)
           .join('')}</span>
+        ${editor}
       </span>
       <span class="row-ops">
         ${statusBadge(status)}
@@ -403,7 +443,7 @@ export function renderAccessPage(grants: GrantView[], csrf: string, now: number)
     </li>`;
   });
   return `
-  <div class="page-head"><h1>Agent access</h1></div>
+  <div class="page-head"><div><p class="eyebrow">Delegation</p><h1>Agent access</h1></div></div>
   <p class="muted">Agents connect through <a href="/.well-known/trailgate">TrailGate</a> and act only within the permissions shown here.</p>
   ${grants.length === 0 ? '<p class="muted">No agent grants yet. When an agent requests access, you will approve it on the consent screen.</p>' : `<ul class="row-list">${rows.join('')}</ul>`}`;
 }
@@ -415,18 +455,25 @@ export function renderConsent(options: {
   resources: string[];
   agentHint?: string;
   requestedSeconds?: number;
+  approvalSuggested?: string[];
   error?: string;
 }): string {
   const granted = options.permissions;
+  const suggested = new Set(options.approvalSuggested ?? []);
   const known = Object.keys(PERMISSION_LABELS);
   const notRequested = known.filter((p) => !granted.includes(p));
   const minutes =
     options.requestedSeconds !== undefined ? Math.round(options.requestedSeconds / 60) : undefined;
+  // Tri-state per permission (spec section 9): allow runs, approval queues
+  // each action for a human decision, deny withholds the permission.
   const permItem = (p: string) => {
     const info = PERMISSION_LABELS[p];
+    const mode = suggested.has(p) ? 'approval' : 'allow';
+    const radio = (value: string, text: string) =>
+      `<label class="check"><input type="radio" name="mode_${esc(p)}" value="${value}"${mode === value ? ' checked' : ''}> ${esc(text)}</label>`;
     return `<li class="perm-item perm-${info?.risk ?? 'read'}">
-      <label class="check"><input type="checkbox" name="perm" value="${esc(p)}" checked>
-      <span>${esc(info?.label ?? p)}</span></label></li>`;
+      <span>${esc(info?.label ?? p)}</span>
+      <span class="row-ops">${radio('allow', 'Allow')}${radio('approval', 'Require approval')}${radio('deny', 'Deny')}</span></li>`;
   };
   return `
   <section class="consent-card">
@@ -462,4 +509,97 @@ export function renderNotFound(): string {
 
 export function renderError(message: string): string {
   return `<section class="empty-state"><h1>Something went wrong</h1><p>${esc(message)}</p></section>`;
+}
+
+/**
+ * Pending actions queued by agents (spec section 12.5): exact proposals
+ * awaiting a human decision. Nothing on this page has executed.
+ */
+export function renderApprovalsPage(
+  records: { id: string; actionId: string; summary: string; state: string; createdAt: number }[],
+): string {
+  const rows = records
+    .map(
+      (r) => `<li class="row row-actions">
+      <span>
+        <a href="/workspace/approvals/${esc(r.id)}"><strong>${esc(r.summary)}</strong></a>
+        <span class="muted">${esc(r.actionId)} &middot; queued ${formatTime(r.createdAt)}</span>
+      </span>
+      <span class="row-ops">${statusBadge(r.state)}</span>
+    </li>`,
+    )
+    .join('');
+  return `
+  <div class="page-head"><div><p class="eyebrow">Delegation</p><h1>Agent approvals</h1></div></div>
+  <p class="muted">Actions your agents proposed that need a human decision. Nothing here has executed yet.</p>
+  ${records.length === 0 ? '<p class="muted">No pending agent actions.</p>' : `<ul class="row-list">${rows}</ul>`}`;
+}
+
+export function renderApprovalDetail(
+  record: {
+    id: string;
+    actionId: string;
+    state: string;
+    method: string;
+    url: string;
+    summary: string;
+    detail?: Record<string, unknown>;
+    grantId: string;
+    requestDigest: string;
+    createdAt: number;
+    expiresAt: number;
+    reason?: string;
+    executedAt?: number;
+    outcome?: { status: number; body?: unknown };
+  },
+  csrf: string,
+  now: number,
+): string {
+  const expired = record.expiresAt <= now;
+  const decided = record.state !== 'pending';
+  const detailBlock =
+    record.detail !== undefined
+      ? `<dl class="dl">${Object.entries(record.detail)
+          .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`)
+          .join('')}</dl>`
+      : '';
+  const resultBlock =
+    record.outcome !== undefined
+      ? `<section class="panel"><h2>Execution result</h2>
+        <p>Status ${esc(String(record.outcome.status))}${record.executedAt !== undefined ? ` &middot; executed ${formatTime(record.executedAt)}` : ''}</p>
+        <pre class="muted">${esc(JSON.stringify(record.outcome.body ?? null, null, 2))}</pre></section>`
+      : '';
+  const reasonBlock =
+    record.reason !== undefined ? `<p class="muted">Reason: ${esc(record.reason)}</p>` : '';
+  const decideBlock = decided
+    ? `<p>Decision recorded: ${statusBadge(record.state)}</p>
+       <p><a class="btn" href="/workspace/approvals">Back to approvals</a></p>`
+    : expired
+      ? `<p class="muted">This proposal expired at ${formatTime(record.expiresAt)}. The agent must submit it again.</p>`
+      : `<form method="post" action="/workspace/approvals/decide" class="inline-form">
+        <input type="hidden" name="_csrf" value="${esc(csrf)}">
+        <input type="hidden" name="action_id" value="${esc(record.id)}">
+        <div class="row-ops">
+          <button class="btn" type="submit" name="decision" value="reject">Reject</button>
+          <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve and execute</button>
+        </div>
+      </form>`;
+  return `
+  <div class="page-head"><div><p class="eyebrow">Agent approvals</p><h1>Review proposed action</h1></div></div>
+  <section class="panel">
+    <p><strong>${esc(record.summary)}</strong></p>
+    <dl class="dl">
+      <dt>Action</dt><dd><code>${esc(record.actionId)}</code></dd>
+      <dt>Request</dt><dd><code>${esc(record.method)} ${esc(record.url)}</code></dd>
+      <dt>Grant</dt><dd><code>${esc(record.grantId)}</code></dd>
+      <dt>Operation digest</dt><dd><code>${esc(record.requestDigest)}</code></dd>
+      <dt>Queued</dt><dd>${formatTime(record.createdAt)}</dd>
+      <dt>Decide by</dt><dd>${formatTime(record.expiresAt)}</dd>
+    </dl>
+    ${detailBlock}
+    <p class="muted">Approving executes this exact proposal once. It cannot be edited; a changed request needs a new proposal.</p>
+    ${reasonBlock}
+  </section>
+  ${resultBlock}
+  ${decideBlock}`;
 }

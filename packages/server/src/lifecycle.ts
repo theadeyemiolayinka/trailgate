@@ -13,6 +13,7 @@ import {
 import type { ResolvedServerConfig } from './config.ts';
 import { assertRequestLimits, verifyAgentRequest } from './enforcement.ts';
 import { randomId } from './ids.ts';
+import { cancelPendingActionsForGrant } from './pending-actions.ts';
 import type { GrantRequestRecord, IssuedGrantRecord } from './ports.ts';
 import { signGrantJwt } from './signing.ts';
 import type {
@@ -284,6 +285,13 @@ export async function getConsentView(
       lifetimeSeconds: record.effectiveLifetimeSeconds ?? config.defaultGrantSeconds,
     },
     lifetimeCapSeconds: config.maxConsentLifetimeSeconds,
+    approvalSuggested: [
+      ...new Set(
+        [...config.actions.values()]
+          .filter((a) => a.approval_required === true)
+          .map((a) => a.permission),
+      ),
+    ].filter((p) => (record.effectivePermissions ?? record.body.permissions).includes(p)),
     ...(record.body.redirect_uri !== undefined ? { redirectUri: record.body.redirect_uri } : {}),
   };
 }
@@ -305,6 +313,15 @@ export interface ConsentNarrow {
   permissions?: string[];
   resources?: string[];
   lifetimeSeconds?: number;
+  /**
+   * The tri-state "require approval" picks (spec section 9): permissions the
+   * user granted but wants to review per action. They must be a subset of
+   * the granted permissions and are persisted as a `require_approval`
+   * constraint on the issued grant. Providing an empty array clears any
+   * require_approval constraint the request itself carried; leaving the
+   * field undefined keeps the request's constraint untouched.
+   */
+  approvalPermissions?: string[];
 }
 
 export async function decideConsent(
@@ -339,6 +356,22 @@ export async function decideConsent(
   const baseResources = record.effectiveResources ?? record.body.resources;
   const narrowedPermissions = assertSubset(narrow?.permissions, basePermissions, 'permissions');
   const narrowedResources = assertSubset(narrow?.resources, baseResources, 'resources');
+  const grantedPermissions = narrowedPermissions ?? basePermissions;
+  const approvalPermissions = assertSubset(
+    narrow?.approvalPermissions,
+    grantedPermissions,
+    'approval permissions',
+  );
+  let effectiveConstraints: Constraint[] | undefined;
+  if (approvalPermissions !== undefined) {
+    const base = record.effectiveConstraints ?? record.body.constraints;
+    effectiveConstraints = [
+      ...base.filter((c) => c.type !== 'require_approval'),
+      ...(approvalPermissions.length > 0
+        ? [{ type: 'require_approval', params: { permissions: [...approvalPermissions] } }]
+        : []),
+    ];
+  }
   let consentLifetime: number | undefined;
   if (narrow?.lifetimeSeconds !== undefined) {
     if (!Number.isInteger(narrow.lifetimeSeconds) || narrow.lifetimeSeconds < 1) {
@@ -363,6 +396,7 @@ export async function decideConsent(
     ...(subject !== undefined ? { subject } : {}),
     ...(narrowedPermissions !== undefined ? { effectivePermissions: narrowedPermissions } : {}),
     ...(effectiveResources !== undefined ? { effectiveResources } : {}),
+    ...(effectiveConstraints !== undefined ? { effectiveConstraints } : {}),
     ...(consentLifetime !== undefined ? { effectiveLifetimeSeconds: consentLifetime } : {}),
   });
   if (decided === undefined) {
@@ -472,6 +506,12 @@ export async function redeemGrant(
     requestId: record.requestId,
     status: 'active',
     permissions: [...(payload.tg.permissions as string[])],
+    // Record the decided scope as the current effective scope so status
+    // surfaces and the tri-state editor reflect consent-time marks (such as
+    // a require_approval constraint) before any post-issuance edit.
+    effectivePermissions: [...(payload.tg.permissions as string[])],
+    effectiveResources: [...payload.tg.resources],
+    effectiveConstraints: [...payload.tg.constraints],
     ...(record.subject !== undefined ? { subject: record.subject } : {}),
   });
   await config.stores.audit.record({
@@ -557,6 +597,10 @@ export async function revokeGrant(
   if (revoked === undefined) {
     throw new TrailGateError(Codes.GRANT_UNKNOWN, 'unknown or already revoked grant');
   }
+  // Revocation cancels queued and approved-not-yet-executed actions; the
+  // execution path re-checks grant status as well, so an action claimed in
+  // between still cannot run under the revoked grant (spec section 12.5).
+  await cancelPendingActionsForGrant(jti, 'grant was revoked', config);
   await config.stores.audit.record({
     event: 'grant.revoked',
     at: revoked.revokedAt ?? config.clock.now(),

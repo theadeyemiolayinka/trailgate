@@ -115,6 +115,8 @@ function usage(): string {
     '                                               send a signed request to a same-origin target',
     '  grants [--issuer origin]                      list stored grants',
     '  revoke <url> --grant-id jti [--reason r]      revoke a grant via the signed endpoint',
+    '  action-status <url> <action-id|status-url> [--grant-id jti]',
+    '                                               poll a queued pending action result',
     '',
     'options:',
     '  --state-dir <dir>   where keys.json, pending.json, grants.json live (default .trailgate)',
@@ -390,6 +392,7 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
         }
         print({
           status: res.status,
+          ...(res.pending !== undefined ? { pending_action: res.pending } : {}),
           ...(res.error !== undefined ? { error: res.error } : {}),
           receipt:
             res.receipt === undefined
@@ -408,6 +411,24 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
         const records = await client.listGrants(issuer !== undefined ? { issuer } : undefined);
         print(records.map(grantView));
         return 0;
+      }
+
+      case 'action-status': {
+        const url = rest[0];
+        const ref = rest[1];
+        if (url === undefined || ref === undefined) {
+          stderr('action-status requires a site url and an action id or status url');
+          return 2;
+        }
+        const client = await (deps.clientFactory ?? defaultClientFactory)({ stateDir });
+        const id = ref.includes('/') ? (ref.split('/').pop() ?? ref) : ref;
+        const view = await client.actionStatus(url, id, {
+          ...(flag(parsed, 'grant-id') !== undefined
+            ? { grantId: flag(parsed, 'grant-id') as string }
+            : {}),
+        });
+        print({ pending_action: view });
+        return view.status === 'failed' || view.status === 'rejected' ? 1 : 0;
       }
 
       case 'revoke': {
