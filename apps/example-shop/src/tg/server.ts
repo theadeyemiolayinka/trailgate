@@ -17,7 +17,7 @@ import {
   createRateLimiter,
   createSpendingLedger,
 } from './stores.ts';
-import { isShopSelector, PERMISSIONS } from './vocabulary.ts';
+import { bindShopSelectors, isShopSelector, PERMISSIONS } from './vocabulary.ts';
 
 /**
  * Loads the persisted site signing key, generating one on first run. The
@@ -107,6 +107,7 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
       approvals: createApprovalStore(db),
     },
     subjectFor: (userId) => userId,
+    bindSubjectResources: (resources, subject) => bindShopSelectors(resources, subject),
     resourceOwners: { ownerOf: async (selector) => ownerOf(db, selector) },
     resourcePolicy: (selectors) => {
       const bad = selectors.filter((s) => !isShopSelector(s));
@@ -123,7 +124,6 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
     refineScope: (requested) => ({
       permissions: [...requested.permissions],
       resources: [...requested.resources],
-      // Site policy ceiling: a cumulative_budget above the shop maximum is
       // tightened to the maximum, never loosened (spec section 9.3).
       constraints: requested.constraints.map((c) =>
         c.type === 'cumulative_budget' &&

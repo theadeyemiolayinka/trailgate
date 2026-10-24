@@ -120,6 +120,20 @@ export interface TrailGateServerOptions {
   /** Optional scope narrowing applied at grant-request intake. */
   refineScope?: ScopeRefiner;
   /**
+   * Optional binding of templated resource selectors at consent approval
+   * (spec section 8). Called only when the decision is `approve`, with the
+   * grant's `sub`. Use it to resolve placeholders such as `cart:{user}` to
+   * the subject's concrete selector (for example `cart:cart_usr_1`). The
+   * result MUST derive from the requested selectors: a concrete requested
+   * selector may only reappear verbatim, and a requested template may only
+   * produce selectors matching its static prefix and suffix. Violations
+   * raise `tg.internal.error` and the request is not approved.
+   */
+  bindSubjectResources?: (
+    resources: readonly string[],
+    subject: string,
+  ) => readonly string[] | Promise<readonly string[]>;
+  /**
    * Authorizes callers of the provisional revocation endpoint.
    * @provisional The endpoint body and caller model are not yet specified in draft 0.1.
    */
@@ -175,6 +189,10 @@ export interface ResolvedServerConfig {
   resourceOwners?: ResourceOwnerResolver;
   resourcePolicy?: ResourceScopePolicy;
   refineScope?: ScopeRefiner;
+  bindSubjectResources?: (
+    resources: readonly string[],
+    subject: string,
+  ) => readonly string[] | Promise<readonly string[]>;
   revocationAuthorizer?: RevocationAuthorizer;
   clock: Clock;
   toleranceSeconds: number;
@@ -295,6 +313,9 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     ...(options.policy !== undefined ? { policy: options.policy } : {}),
     ...(options.resourceOwners !== undefined ? { resourceOwners: options.resourceOwners } : {}),
     ...(options.resourcePolicy !== undefined ? { resourcePolicy: options.resourcePolicy } : {}),
+    ...(options.bindSubjectResources !== undefined
+      ? { bindSubjectResources: options.bindSubjectResources }
+      : {}),
     ...(options.refineScope !== undefined ? { refineScope: options.refineScope } : {}),
     ...(options.revocationAuthorizer !== undefined
       ? { revocationAuthorizer: options.revocationAuthorizer }

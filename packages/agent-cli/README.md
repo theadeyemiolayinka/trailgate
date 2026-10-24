@@ -24,6 +24,8 @@ trailgate revoke https://shop.example.com --grant-id <jti>
 
 `request` prints a `consent_url`; the user approves on the site's own surface. `--wait` polls `grant_status` and redeems automatically. Without `--wait`, approve then run `redeem <url> --request-id <id>`.
 
+`request` also accepts `--resource <selector>` (repeatable) for resource scope. When the site publishes an action catalog, `request` automatically adds subject-derived templates such as `cart:{user}` declared by actions matching the requested permissions; the site binds them to concrete selectors at consent, so the agent never needs to guess a user's resource ids. Path-parameter templates like `order:{id}` are not auto-requested.
+
 `--state-dir <dir>` (default `./.trailgate`) selects where `keys.json`, `pending.json`, `grants.json`, and `discovery.json` (the action-catalog cache, refreshed when stale) live.
 
 ## State files

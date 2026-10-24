@@ -211,6 +211,36 @@ describe('consent decisions', () => {
     assert.equal(target.searchParams.get('state'), 'xyz-123');
   });
 
+  it('binds {user} selector templates to the approving subject at consent', async () => {
+    const server = makeServer({
+      bindSubjectResources: (resources, subject) =>
+        resources.map((r) => (r === 'cart:{user}' ? `cart:cart_${subject}` : r)),
+    });
+    const res = await server.handleGrantRequest(
+      post(
+        `${ISSUER}/tg/grant-request`,
+        grantRequestBody({ resources: ['cart:{user}', 'wallet:wlt_1'] }),
+      ),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    const { verifier } = pkce();
+    void verifier;
+    await server.decideConsent(requestId, 'approve', 'user_1');
+    const view = await server.getConsent(requestId);
+    assert.deepEqual(view?.effective.resources, ['cart:cart_user_1', 'wallet:wlt_1']);
+  });
+
+  it('rejects bound resources that do not derive from the requested scope', async () => {
+    const server = makeServer({
+      bindSubjectResources: () => ['vault:vlt_other_user'],
+    });
+    const res = await server.handleGrantRequest(
+      post(`${ISSUER}/tg/grant-request`, grantRequestBody({ resources: ['cart:{user}'] })),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    await assertCode(server.decideConsent(requestId, 'approve', 'user_1'), Codes.INTERNAL_ERROR);
+  });
+
   it('refines scope through the configured hook and enforces subset rules', async () => {
     const server = makeServer({
       refineScope: (requested) => ({

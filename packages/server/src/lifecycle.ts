@@ -101,6 +101,45 @@ async function computeEffectiveScope(
   return { ...effective, lifetimeSeconds: lifetime };
 }
 
+/**
+ * Guards `bindSubjectResources`: every bound selector must derive from a
+ * requested one. A requested selector containing `{...}` is a template; a
+ * bound selector derives from it when it shares the template's static
+ * prefix and suffix (the placeholder region is exactly what the subject
+ * binding may fill). Concrete requested selectors may only reappear
+ * verbatim. Dropping a selector is allowed (consent narrows scope).
+ */
+export function assertBoundResourcesDeriveFrom(
+  requested: readonly string[],
+  bound: readonly string[],
+): void {
+  const concrete = new Set(requested.filter((r) => !r.includes('{')));
+  const templates = requested
+    .filter((r) => r.includes('{'))
+    .map((r) => {
+      const open = r.indexOf('{');
+      const close = r.indexOf('}', open);
+      return { prefix: r.slice(0, open), suffix: close === -1 ? '' : r.slice(close + 1) };
+    });
+  for (const b of bound) {
+    const derived =
+      concrete.has(b) ||
+      templates.some(
+        (t) =>
+          b.startsWith(t.prefix) &&
+          b.endsWith(t.suffix) &&
+          b.length > t.prefix.length + t.suffix.length,
+      );
+    if (!derived) {
+      throw new TrailGateError(
+        Codes.INTERNAL_ERROR,
+        'bindSubjectResources returned a selector outside the requested scope',
+        { selector: b },
+      );
+    }
+  }
+}
+
 export async function submitGrantRequest(
   body: unknown,
   config: ResolvedServerConfig,
@@ -242,10 +281,17 @@ export async function decideConsent(
     );
   }
   const subject = decision === 'approve' ? config.subjectFor(siteUserId as string) : undefined;
+  let boundResources: string[] | undefined;
+  if (subject !== undefined && config.bindSubjectResources !== undefined) {
+    const requested = record.effectiveResources ?? record.body.resources;
+    boundResources = [...(await config.bindSubjectResources(requested, subject))];
+    assertBoundResourcesDeriveFrom(requested, boundResources);
+  }
   const decided = await config.stores.grantRequests.transition(requestId, 'pending', {
     status: decision === 'approve' ? 'approved' : 'denied',
     decidedAt: now,
     ...(subject !== undefined ? { subject } : {}),
+    ...(boundResources !== undefined ? { effectiveResources: boundResources } : {}),
   });
   if (decided === undefined) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'grant request already decided');

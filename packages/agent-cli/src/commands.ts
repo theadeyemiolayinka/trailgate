@@ -240,10 +240,31 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
           return 2;
         }
         const client = await (deps.clientFactory ?? defaultClientFactory)({ stateDir });
+        // Subject-derived templates (`cart:{user}`) advertised by matching
+        // actions are requested verbatim; the site binds them at consent.
+        // Path-parameter templates (`order:{id}`) are skipped: they cannot be
+        // bound before the resource exists.
+        const wanted = new Set(permissions);
+        const derived: string[] = [];
+        try {
+          for (const entry of await client.listActions(url)) {
+            const resource = entry.action.resource;
+            if (
+              resource !== undefined &&
+              resource.includes('{user}') &&
+              wanted.has(entry.action.permission) &&
+              !derived.includes(resource)
+            ) {
+              derived.push(resource);
+            }
+          }
+        } catch {
+          // no usable catalog; explicit --resource flags still apply
+        }
         const signer = await pickSigner(stateDir, flag(parsed, 'key'));
         const session = await client.requestGrant(url, {
           permissions,
-          resources: flagAll(parsed, 'resource'),
+          resources: [...new Set([...flagAll(parsed, 'resource'), ...derived])],
           constraints: parseConstraints(flagAll(parsed, 'constraint')),
           ...(flag(parsed, 'redirect') !== undefined
             ? { redirectUri: flag(parsed, 'redirect') as string }

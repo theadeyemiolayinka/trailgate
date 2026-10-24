@@ -169,6 +169,7 @@ No other personal data (names, emails, identifiers beyond `sub`) MAY appear in a
 
 - `tg.resources` is an array of site-defined resource selector strings. Recommended form: `<type>:<id>` (for example `cart:cart_01H…`, `order:ord_9f2…`). Exact match only in 0.1: a request touches a resource only when its identifier equals a listed selector.
 - Wildcards and prefix matching are deliberately excluded from 0.1; sites needing broader scope issue explicit selector lists.
+- Subject-derived templates: an action catalog MAY advertise a selector containing `{user}` (for example `cart:{user}`) to denote "this user's resource" when the concrete identifier cannot be known before consent. The agent MAY request the template verbatim. At consent approval, once the site knows the authenticated subject, the site binds each template to a concrete selector derived from it (for example `cart:cart_usr_demo`) and records the bound set as the grant's effective resources. Binding MUST NOT introduce selectors beyond the requested set; every bound selector must equal a requested concrete selector or derive from a requested template. Bound concrete selectors, not templates, are what the grant carries and what enforcement matches.
 - Cross-user isolation: a resource selector MUST resolve to resources owned by the user context (`sub`) the grant was issued under. A grant valid for user A's resources MUST NOT authorize access to user B's, even if the selector string matches. Enforcement checks ownership against authoritative state.
 
 ## 9. Constraints

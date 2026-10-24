@@ -178,6 +178,7 @@ agents; enforcement is unaffected whether a route advertises or not.
 | `resourceOwners` | | none | `ownerOf(selector)` for cross-user isolation. Required for resource-scoped routes. |
 | `resourcePolicy` | | accept all | Intake-time selector namespace check. |
 | `refineScope` | | pass-through | Narrows requested scope; SDK enforces subset rules. |
+| `bindSubjectResources` | | none | Binds subject-derived selector templates (for example `cart:{user}`) to concrete selectors once the consenting user is known. Runs inside `decideConsent` before approval; the result replaces the effective resources. The SDK rejects any bound selector that does not equal a requested selector or derive from a requested template, so binding can only narrow. Site-dependent: if you advertise `{user}` templates without this hook, the literal template string is granted and never matches a real resource. |
 | `revocationAuthorizer` | | deny unsigned | Authorizes `handleRevocation` calls not carrying a signed self-revocation request. A bound grant can always revoke itself without it. |
 | `maxBodyBytes` | | 64 KiB | Body cap on protocol and protected requests; over limit answers `tg.request.too_large` before verification. |
 | `maxHeadersBytes` | | 16 KiB | Combined header-name+value cap, same handling. |
