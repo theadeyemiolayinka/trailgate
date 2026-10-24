@@ -1,21 +1,22 @@
 # Architecture
 
-Status: proposed design. Except where noted, nothing described here is implemented. The normative contract will live in `spec/`; this document explains the intended shape and trust boundaries.
+Status: implemented draft 0.1. The normative contract lives in `spec/`; this document explains the component shape and trust boundaries.
 
 ## Components
 
-| Component | Purpose | Owner | Status |
-| --- | --- | --- | --- |
-| `spec/` | Language-neutral protocol contract: document, schemas, wire formats, error codes, vectors. | D0 | planned |
-| `packages/core/` | Shared types, validation, permission semantics, crypto verification abstractions, request binding, receipt verification. | D0 | scaffolded |
-| `packages/server/` | Website integration SDK: discovery endpoint, consent/grant endpoints, grant lifecycle, policy hooks, audit hooks, constraint enforcement. | D1 | scaffolded |
-| `packages/agent/` | Client SDK: discovery, key management, consent initiation, signed requests, grant status, receipt verification. | D2 | scaffolded |
-| `packages/agent-cli/` | Developer CLI on the Agent SDK. | D2 | scaffolded |
-| `packages/mcp-adapter/` | Optional MCP adapter on the Agent SDK. Never required by the protocol. | D2 | scaffolded |
-| `packages/conformance/` | Runnable conformance checks for third-party implementers. | D0 | scaffolded |
-| `packages/test-fixtures/` | Shared test vectors and fixtures. | D0 | scaffolded |
-| `apps/example-shop/` | Reference ecommerce site: consent UX, simulated wallet with real accounting semantics. | D3 | reserved, framework undecided |
-| `tests/` | Cross-component suites: integration, security, adversarial, interoperability. | all | planned |
+| Component | Purpose |
+| --- | --- |
+| `spec/` | Language-neutral protocol contract: document, schemas, wire formats, error codes, vectors. |
+| `packages/core/` | Shared types, validation, permission semantics, crypto verification abstractions, request binding, receipt verification. |
+| `packages/server/` | Website integration SDK: discovery endpoint, consent/grant endpoints, grant lifecycle, policy hooks, audit hooks, constraint enforcement. |
+| `packages/agent/` | Client SDK: discovery, key management, consent initiation, signed requests, grant status, receipt verification. |
+| `packages/agent-cli/` | Developer CLI on the Agent SDK. |
+| `packages/mcp-adapter/` | Optional MCP adapter on the Agent SDK. Never required by the protocol. |
+| `packages/conformance/` | Runnable conformance checks for third-party implementers. |
+| `packages/test-fixtures/` | Shared test vectors and fixtures. |
+| `apps/example-shop/` | Reference ecommerce site: consent UX, simulated wallet with real accounting semantics. |
+| `apps/blogarithm/` | Second reference application: a blogging platform demonstrating delegated authority over content. |
+| `tests/` | Cross-component suites: integration, security, adversarial, interoperability. |
 
 ## Actors and trust boundaries
 
@@ -29,7 +30,7 @@ Boundaries:
 4. Discovery fetch path: the discovery document is untrusted input until validated against the schema and bound to the expected origin.
 5. Persistence: grant store, wallet ledger, and audit log are authoritative server state, not agent-controllable data.
 
-## Intended request flow (planned)
+## Request flow
 
 1. Discovery: the agent fetches the site's discovery document and validates it (schema, version, origin binding).
 2. Consent: the agent initiates a consent flow; the user reviews and approves a narrowly scoped grant on the site.

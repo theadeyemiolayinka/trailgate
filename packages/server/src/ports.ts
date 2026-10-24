@@ -293,8 +293,8 @@ export type PendingActionState =
 
 /**
  * A queued action proposal awaiting (or carrying) a human decision. The
- * record stores an immutable snapshot of the proposed operation — method,
- * absolute URL, body bytes, resolved resource and amount — identified by
+ * record stores an immutable snapshot of the proposed operation - method,
+ * absolute URL, body bytes, resolved resource and amount - identified by
  * `requestDigest` (the same operation digest the idempotency layer uses).
  * It never stores the grant token, signatures, or any credential.
  */
@@ -369,7 +369,7 @@ export interface PendingActionRecord {
 export interface PendingActionStore {
   /**
    * Inserts the record, or returns the already-open record for the same
-   * `(grantId, requestDigest)` when one exists — re-submitting a byte-
+   * `(grantId, requestDigest)` when one exists - re-submitting a byte-
    * identical proposal returns the live action instead of duplicating it.
    * Implementations MUST enforce this atomically (a partial unique index
    * on open states, or an equivalent check-and-insert).

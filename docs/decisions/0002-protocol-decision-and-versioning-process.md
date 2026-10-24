@@ -9,11 +9,10 @@ The spec will be consumed by independently implemented websites and agents. Unco
 ## Decision
 
 - The normative contract lives in `spec/`. Code, docs, and examples are non-normative; where they disagree with the spec, the spec wins and they are fixed.
-- Shared contracts are agreed before independent implementations depend on them. A contract change (wire format, schema, error code, crypto suite, endpoint semantics, public SDK API consumed by another owner) requires all of:
+- Shared contracts are agreed before independent implementations depend on them. A contract change (wire format, schema, error code, crypto suite, endpoint semantics, public SDK API consumed by another package) requires all of:
   1. An ADR in `docs/decisions/` with motivation and alternatives considered.
-  2. Written signoff from each affected owner per `internal/TEAM.md`. D0 arbitrates disputes.
-  3. Spec, schemas, examples, conformance vectors, and tests updated in the same change.
-- Versioning: pre-1.0 spec versions are drafts numbered `0.x`. Breaking changes between drafts are allowed but must bump the draft version and document migration. A semver commitment begins at 1.0, which is not declared before Phase 4 interoperability evidence exists.
+  2. Spec, schemas, examples, conformance vectors, and tests updated in the same change.
+- Versioning: pre-1.0 spec versions are drafts numbered `0.x`. Breaking changes between drafts are allowed but must bump the draft version and document migration. A semver commitment begins at 1.0, which is not declared before independent interoperability evidence exists.
 - Error codes form an append-only registry in `spec/`. Codes are added or deprecated, never reused or removed.
 - Discovery documents and grant formats carry explicit version fields from the start so implementations can detect incompatible peers.
 - A contract ambiguity discovered during implementation blocks that work until resolved through this process; implementers do not invent interfaces.

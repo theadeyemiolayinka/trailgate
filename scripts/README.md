@@ -1,9 +1,12 @@
 # Scripts
 
-Development and reproducible demo scripts. Planned:
+Development, demo, and release scripts.
 
-- Environment check (Node and pnpm versions).
-- Local demo bootstrap for ExampleShop (Phase 3).
-- Conformance runner wrapper (Phase 4).
+| Script | Purpose | Entry point |
+| --- | --- | --- |
+| `agent-demo.ts` | Reproducible agent-connection demo: the full client flow against the server SDK in-process. | `node --experimental-strip-types scripts/agent-demo.ts` after `pnpm build` |
+| `bundle.mjs` | Builds self-contained single-file executables (`bundle/trailgate.mjs`, `bundle/trailgate-mcp.mjs`). | `pnpm bundle` |
+| `embed-schemas.mjs` | Embeds the `spec/schemas/` documents into package sources for the single-file bundles. | `pnpm embed` |
+| `pack.mjs` | Assembles release artifacts in `dist-release/`: bundles, package tarballs, `SHA256SUMS`. | `pnpm release` |
 
-Empty until a real need exists.
+See `docs/RELEASING.md` for the release pipeline and `docs/INSTALL_AND_DEPLOY.md` for how the bundles are consumed.

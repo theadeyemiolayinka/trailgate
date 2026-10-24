@@ -43,7 +43,7 @@ interface SiteCaps {
 /**
  * Post-issuance scope control: the user ticks what the agent may do and
  * sets its spending limits; the site applies both in place, covering every
- * permission the shop advertises — both removing and adding. Only the site
+ * permission the shop advertises - both removing and adding. Only the site
  * can change a grant's scope; the agent can never modify its own.
  */
 function permEditor(ctx: RenderCtx, grant: IssuedGrantView, caps: SiteCaps): string {

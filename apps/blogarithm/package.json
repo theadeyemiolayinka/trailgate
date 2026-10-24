@@ -8,6 +8,7 @@
     "dev": "node --watch src/server.ts",
     "start": "node src/server.ts",
     "demo": "node src/dev/demo-agent.ts",
+    "certs": "bash scripts/dev-certs.sh",
     "seed": "node src/db/seed.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test \"src/**/*.test.ts\""

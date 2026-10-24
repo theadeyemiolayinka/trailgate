@@ -76,7 +76,7 @@ notifications) plus the shared `tg_*` protocol tables used by
 
 - Editor is markdown + preview, not a rich-text component.
 - `post:{user}` binds at consent time; posts created later are not in
-  scope (re-consent needed — matches spec semantics).
+  scope (re-consent needed - matches spec semantics).
 - `approval_threshold` constraint type is wired (approvals store) but no
   route currently requires it.
 - TLS listener needs dev certs (`dev-certs/`); the demo uses the loopback

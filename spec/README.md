@@ -20,4 +20,3 @@ Protocol and SDK errors carry a stable, machine-readable code plus a human-reada
 - Spec changes follow the process in `docs/decisions/0002-protocol-decision-and-versioning-process.md`.
 - The spec must not depend on this repository layout, ExampleShop, or MCP.
 - Schema and vector changes are validated by `packages/test-fixtures` (`src/spec-vectors.test.ts`), which runs under `pnpm test`.
-- Owner: D0 (see `internal/TEAM.md`). Implementer handoff: `docs/handoff.md`.

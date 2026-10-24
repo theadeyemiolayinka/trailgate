@@ -28,6 +28,17 @@ corepack pnpm dev            # same, with file watching
 
 The database and seed data are created automatically on first run.
 
+## TLS mode
+
+```bash
+corepack pnpm certs   # generates dev-certs/ca.crt + server cert (needs openssl)
+corepack pnpm dev     # now also serves https://localhost:3444
+```
+
+Dev certs are generated locally and not committed. Trust them for Node
+tools with `export NODE_EXTRA_CA_CERTS=$PWD/dev-certs/ca.crt`; import
+`ca.crt` into the browser/OS trust store to remove the warning.
+
 ## Demo account
 
 `demo@blogarithm.dev` / `demo-password-1`

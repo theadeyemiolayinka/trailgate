@@ -16,7 +16,7 @@ import { openDatabase } from './db/database.ts';
 import { loopbackTransport } from './dev/loopback.ts';
 
 /**
- * Integration milestone A: the first real end-to-end flow.
+ * Live end-to-end flow:
  *
  * The ExampleShop server runs as a real child process over real HTTP with
  * a real SQLite file; the stock Agent SDK (plus the shipped loopback
@@ -108,10 +108,10 @@ async function approveConsent(base: string, requestId: string): Promise<void> {
   assert.equal(decide.status, 303, `consent decision failed: ${decide.status}`);
 }
 
-test('milestone A: live end-to-end flow over real http, real db, real sdks', async () => {
+test('live end-to-end flow over real http, real db, real sdks', async () => {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
-  const dir = mkdtempSync(join(tmpdir(), 'tg-milestone-'));
+  const dir = mkdtempSync(join(tmpdir(), 'tg-live-e2e-'));
   const dbPath = join(dir, 'shop.db');
   const proc = spawn(process.execPath, [serverEntry], {
     env: {

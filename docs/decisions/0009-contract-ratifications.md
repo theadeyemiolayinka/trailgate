@@ -4,7 +4,7 @@ Status: accepted, draft 0.1 errata
 
 ## Context
 
-Phase 2/3 implementation surfaced six provisional surfaces that the draft 0.1 contract
+Implementation surfaced six provisional surfaces that the draft 0.1 contract
 left undefined (recorded in `packages/agent/DESIGN.md` Q1-Q5 and the Server SDK
 integration notes). Each needed a normative decision so implementations stop carrying
 `@provisional` markers.

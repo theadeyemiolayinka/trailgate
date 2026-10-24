@@ -1,8 +1,8 @@
 # Security guarantees
 
 What this repository does and does not guarantee at draft 0.1. Every claim below is
-bounded by what the test suite actually demonstrates; see the requirement-to-test
-matrix in `docs/security-review-0.1.md` for evidence per claim.
+bounded by what the test suite actually demonstrates; run `pnpm test` for the
+evidence behind each claim.
 
 This is an experimental protocol. Nothing here is formally verified, certified, or
 production-ready.

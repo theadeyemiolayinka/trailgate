@@ -8,7 +8,7 @@ import type { HostRequest, RouteProtection, SelectorContext } from './types.ts';
 /**
  * Pending actions (spec section 12.5): durable, human-decided proposals for
  * approval-gated routes. A submission stores the exact operation the agent
- * signed for — method, URL, body bytes, resolved resource and amount — and
+ * signed for - method, URL, body bytes, resolved resource and amount - and
  * answers `202` with a structured `pending_action` body. Nothing executes
  * until the site user approves, and approval replays the stored proposal
  * through the registered handler (see `executePendingAction` in
@@ -115,7 +115,7 @@ export interface QueuePendingActionInput {
 /**
  * Queues the verified request as a pending action and returns the stored
  * record. A byte-identical proposal that is still open returns the existing
- * record (`fresh: false`) rather than a duplicate — the store enforces that
+ * record (`fresh: false`) rather than a duplicate - the store enforces that
  * atomically on `(grantId, requestDigest)`.
  */
 export async function queuePendingAction(
@@ -198,7 +198,7 @@ export async function queuePendingAction(
 /**
  * `GET <endpoints.action_status>/{id}` (spec section 12.5). The request
  * verifies as an ordinary signed request; the grant must be the one the
- * action was proposed under — another grant's view of the action is `404`.
+ * action was proposed under - another grant's view of the action is `404`.
  */
 export async function actionStatus(
   actionId: string,

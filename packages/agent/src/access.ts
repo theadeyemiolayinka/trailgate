@@ -131,8 +131,8 @@ export function checkAccess(
 /**
  * Same as `checkAccess` plus an optional live `grant_status` refresh
  * (`criteria.confirmFresh`): stored grants are reconciled with the site's
- * current effective scope first — permissions the site later allowed or
- * removed are adopted — then a `ready` result is re-checked so a revoked
+ * current effective scope first - permissions the site later allowed or
+ * removed are adopted - then a `ready` result is re-checked so a revoked
  * grant surfaces as `revoked` instead of looking usable. Scope updates
  * reported by the site are applied to the records, so callers should
  * treat returned records as fresh and persist them if they keep copies.

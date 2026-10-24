@@ -615,7 +615,7 @@ export async function revokeGrant(
  * replaces the grant's effective permission (and optionally resource) set.
  * Only the site can do this; agents can never modify their own scope. The
  * set must stay inside the site's advertised permission vocabulary, and an
- * empty set is refused — removing every permission is a revocation.
+ * empty set is refused - removing every permission is a revocation.
  * Enforcement treats the stored scope as live state; it takes effect on
  * the next request without reissuing a JWT.
  */

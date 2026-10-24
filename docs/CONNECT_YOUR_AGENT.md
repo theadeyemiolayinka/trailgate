@@ -10,7 +10,7 @@ state directory.
 A stdio MCP server (`trailgate-mcp.mjs`) that owns all the cryptography:
 key generation, discovery + signature verification, consent initiation,
 PKCE redemption, request signing, receipt verification. The model only
-picks tools and reads results — it never touches key material.
+picks tools and reads results - it never touches key material.
 
 | Tool | Does |
 | --- | --- |
@@ -31,12 +31,11 @@ cd trailgate
 pnpm install && pnpm bundle   # -> bundle/trailgate.mjs, bundle/trailgate-mcp.mjs
 ```
 
-Or grab both files from the latest GitHub Release — no build needed.
+Or grab both files from the latest GitHub Release - no build needed.
 
 ## Step 1: Devin
 
-Devin reads `~/.config/devin/mcp_config.json` (already written for this
-machine — shown here for reference):
+Devin reads `~/.config/devin/mcp_config.json`:
 
 ```json
 {
@@ -128,7 +127,7 @@ node bundle/trailgate.mjs fetch    https://localhost:3443 /api/cart --state-dir 
 
 `apps/claude-host` is the reference: it loads the same tools, gates
 mutating calls behind a terminal `y/N` prompt, and feeds the tool
-surface to the Anthropic messages API. Copy it for any model — the only
+surface to the Anthropic messages API. Copy it for any model - the only
 model-specific code is the message loop; tools come from
 `createTrailGateTools(client, { beforeAction })`.
 

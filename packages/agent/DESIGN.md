@@ -1,8 +1,8 @@
 # Agent SDK design (draft 0.1 foundation)
 
-Owner: D2. Status: Phase 2 foundation against `spec/protocol.md` draft 0.1. Experimental; not production ready.
+Status: implemented against `spec/protocol.md` draft 0.1. Experimental; not production ready.
 
-This document records the API outline and design choices. The provisional surfaces and contract questions were settled by ADR 0009 (draft 0.1 errata); resolutions are recorded under "Questions for D0" below.
+This document records the API outline and design choices. The provisional surfaces and contract questions were settled by ADR 0009 (draft 0.1 errata); resolutions are recorded under "Design questions" below.
 
 ## Model boundary
 
@@ -47,7 +47,7 @@ Previously `@provisional`; settled by ADR 0009.
 3. Status responses are unsigned informational documents (spec section 10.5); `fetchGrantStatus` treats them as advisory, matching the ratified contract.
 4. `AgentSigner.sign(signatureBase)` duplicates the last step of core `signRequest` so non-exportable key providers work. Header bytes are tested identical to core's output for Ed25519.
 
-## Questions for D0
+## Design questions
 
 Resolved in ADR 0009 (`docs/decisions/0009-contract-ratifications.md`), draft 0.1 errata:
 

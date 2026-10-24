@@ -1,6 +1,6 @@
 # Threat model
 
-Status: updated after the draft 0.1 security review (`docs/security-review-0.1.md`).
+Status: updated for draft 0.1.
 `packages/core` now implements and tests the enforcement-stage mitigations listed below.
 Mitigations that depend on injected ports or on packages that do not exist yet are marked
 accordingly; they are requirements for a deployment, not shipped guarantees.
@@ -9,8 +9,8 @@ Legend:
 
 - **Core**: implemented and tested in `packages/core`.
 - **Port**: core invokes it but correctness depends on the injected implementation.
-- **Unimplemented**: no code exists in this repository; required of D1/D2/application
-  layers per `internal/PHASES.md`.
+- **Unimplemented**: no code exists in this repository; required of the SDK and
+  application layers that consume `packages/core`.
 
 ## Assets
 

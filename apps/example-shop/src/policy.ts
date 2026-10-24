@@ -3,7 +3,7 @@ import type { ShopConfig } from './config.ts';
 
 /**
  * Server-authoritative spending policy. Values come from ShopConfig; the
- * UI reads them from `tg.spendingPolicy` for display only — enforcement
+ * UI reads them from `tg.spendingPolicy` for display only - enforcement
  * happens server-side (refineScope at intake, charge-time cap).
  */
 export interface ShopPolicy {

@@ -47,18 +47,17 @@ Do not mark work complete because it compiles. Report which gates you actually r
 
 ## Adding a package
 
-Copy the scaffold shape used by existing packages: `package.json` with `build`, `typecheck`, and `test` scripts, a `tsconfig.json` extending `tsconfig.base.json`, a `README.md` stating owner and scope, and `src/index.ts`. Packages under `packages/*` and `apps/*` are picked up by the workspace automatically.
+Copy the scaffold shape used by existing packages: `package.json` with `build`, `typecheck`, and `test` scripts, a `tsconfig.json` extending `tsconfig.base.json`, a `README.md` stating scope, and `src/index.ts`. Packages under `packages/*` and `apps/*` are picked up by the workspace automatically.
 
 ## Shared contracts
 
-Any change to a shared interface (wire format, schema, error code, endpoint semantics, public SDK API used by another owner) requires all of:
+Any change to a shared interface (wire format, schema, error code, endpoint semantics, public SDK API used by another package) requires all of:
 
 1. An ADR in `docs/decisions/` describing motivation and alternatives.
-2. Signoff from each affected owner per `internal/TEAM.md`.
-3. Spec, schemas, examples, conformance vectors, and tests updated in the same change.
+2. Spec, schemas, examples, conformance vectors, and tests updated in the same change.
 
-If a contract you need is missing or ambiguous, raise it to D0 before inventing an interface.
+If a contract you need is missing or ambiguous, raise it for discussion before inventing an interface.
 
-## Milestone reports
+## Change reports
 
-At each milestone report: what changed, which files and public APIs changed, which checks actually ran and their results, known limitations and security risks, dependencies on other owners, and the next recommended step.
+For each change, report: what changed, which files and public APIs changed, which checks actually ran and their results, known limitations and security risks, dependencies on other packages, and the next recommended step.

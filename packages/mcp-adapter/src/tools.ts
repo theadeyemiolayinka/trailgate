@@ -8,7 +8,7 @@ import { isTrailGateError } from '@trailgate/core';
  * MCP is an adapter for compatible agent runtimes; it is not the protocol.
  * This module deliberately avoids a dependency on `@modelcontextprotocol/sdk`:
  * it produces plain tool descriptors (`name`, `description`, `inputSchema`,
- * `handler`) that a thin Phase 4 adapter maps onto the MCP SDK's `tool()`
+ * `handler`) that a thin adapter maps onto the MCP SDK's `tool()`
  * registration.
  *
  * The security boundary is the same one the Agent SDK enforces plus one
@@ -203,7 +203,7 @@ export interface TrailGateToolOptions {
 
 /**
  * The MCP tool surface over an `AgentClient`.
- * @provisional Phase 4 deliverable: names, inputs, and result shapes may
+ * @provisional Names, inputs, and result shapes may
  * change when the real MCP SDK integration lands. The boundary rules above
  * are not provisional.
  */

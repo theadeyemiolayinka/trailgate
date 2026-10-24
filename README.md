@@ -26,7 +26,6 @@ The repository contains the draft 0.1 protocol contract in `spec/` (normative do
 | `apps/example-shop/` | Ecommerce reference application with consent UX and simulated wallet. |
 | `tests/` | Integration, security, adversarial, and interoperability suites. |
 | `scripts/` | Development and reproducible demo scripts. |
-| `internal/` | Team collaboration docs: roster, phases. Not protocol documentation. |
 
 ## Getting started
 
@@ -55,8 +54,6 @@ pnpm verify
 ## Development
 
 - `CONTRIBUTING.md`: workflow, commit style, code conventions, quality gates.
-- `internal/TEAM.md`: workstream ownership and interface rules.
-- `internal/PHASES.md`: staged build plan and integration milestones.
 - `docs/architecture.md`: components and trust boundaries.
 - `docs/threat-model.md`: assets, attackers, surfaces, mitigations, open risks.
 - `docs/guides/quickstart.md`: verified external setup path.
@@ -64,12 +61,9 @@ pnpm verify
 - `docs/INSTALL_AND_DEPLOY.md`: bundle builds, MCP configs, two-laptop setup.
 - `docs/RELEASING.md`: changesets versioning and the manual GitHub Release pipeline.
 - `docs/limitations.md`: known limitations, honestly stated.
-- `docs/security-review-0.1.md`: adversarial audit of draft 0.1 core.
-- `docs/release-review-0.1.md`: requirement-to-test matrix, conformance findings, and the release decision.
 - `docs/security-guarantees.md`: what this repository does and does not guarantee.
 - `docs/decisions/`: architecture decision records.
 - `docs/research/protocol-references.md`: standards research behind the contract.
-- `docs/handoff.md`: which schema and interface each owner implements next.
 - `spec/protocol.md`: the normative draft 0.1 contract.
 
 ## License

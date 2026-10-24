@@ -76,15 +76,15 @@ node packages/agent-cli/src/cli.ts fetch https://localhost:3443 /api/cart
 | Use the CLI | `packages/agent-cli/README.md` |
 | Wire an MCP runtime | `packages/mcp-adapter/README.md` (9 tools, boundary rules) |
 | See a full demo | `apps/example-shop/docs/DEMO.md` |
-| Judge security claims | `docs/security-guarantees.md`, `docs/threat-model.md`, `docs/release-review-0.1.md` |
+| Evaluate security claims | `docs/security-guarantees.md`, `docs/threat-model.md` |
 | Check limits | `docs/limitations.md` |
 
 ## 5. Reproduce the security evidence
 
 ```sh
 pnpm test                                                  # everything
-node --test apps/example-shop/src/milestone-a.test.ts      # live e2e: real process, real db, real SDKs
-node --test apps/example-shop/src/milestone-b.test.ts      # policy lifecycle, approval_threshold, refunds
+node --test apps/example-shop/src/live-e2e.test.ts         # live e2e: real process, real db, real SDKs
+node --test apps/example-shop/src/policy-lifecycle.test.ts # policy lifecycle, approval_threshold, refunds
 node --test apps/example-shop/src/tg/concurrency.test.ts   # cross-process overspend proof
 node --test apps/example-shop/src/tg/conformance.test.ts   # port-contract suite on SQLite stores
 ```

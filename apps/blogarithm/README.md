@@ -42,7 +42,7 @@ corepack pnpm test
 | `src/domain/` | posts, comments, notifications, users (auth, sessions) |
 | `src/db/` | `node:sqlite` schema, migrations, seed data |
 | `src/ui/` | Server-rendered pages, layout, markdown renderer |
-| `src/dev/` | `demo-agent.ts` (judge demo), `loopback.ts` (dev transport) |
+| `src/dev/` | `demo-agent.ts` (scripted demo), `loopback.ts` (dev transport) |
 | `public/` | stylesheet served at `/static/` |
 
 Docs: `docs/BLOGARITHM_*.md` in this directory.

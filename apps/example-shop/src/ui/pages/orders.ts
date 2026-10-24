@@ -103,7 +103,7 @@ export function renderOrderDetail(
   }
   if (address !== undefined) {
     meta.push(
-      `<dt>Ship to</dt><dd>${esc(address.label)} — ${esc(address.line1)}${address.line2 !== undefined ? `, ${esc(address.line2)}` : ''}, ${esc(address.city)}${address.region !== undefined ? `, ${esc(address.region)}` : ''} ${esc(address.postcode)}, ${esc(address.country)}</dd>`,
+      `<dt>Ship to</dt><dd>${esc(address.label)} - ${esc(address.line1)}${address.line2 !== undefined ? `, ${esc(address.line2)}` : ''}, ${esc(address.city)}${address.region !== undefined ? `, ${esc(address.region)}` : ''} ${esc(address.postcode)}, ${esc(address.country)}</dd>`,
     );
   }
   if (order.refundedAt !== undefined) {

@@ -1,8 +1,8 @@
 /**
- * Judge-facing TrailGate demonstration covering the required scenarios.
+ * Scripted TrailGate demonstration covering the supported scenarios.
  * Run with the shop up: `pnpm demo`. Every step goes through the real
  * Agent SDK, Server SDK, enforcement pipeline, and database. Denials
- * shown are real protocol denials or real business errors — nothing is
+ * shown are real protocol denials or real business errors - nothing is
  * simulated.
  *
  * Flags:

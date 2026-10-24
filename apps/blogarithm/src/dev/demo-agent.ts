@@ -1,8 +1,8 @@
 /**
- * Judge-facing TrailGate demonstration for Blogarithm. Run with the app
+ * Scripted TrailGate demonstration for Blogarithm. Run with the app
  * up: `pnpm demo`. Every step goes through the real Agent SDK, Server
  * SDK, enforcement pipeline, and database. Denials shown are real
- * protocol denials — nothing is simulated.
+ * protocol denials - nothing is simulated.
  *
  * The story: an agent gets draft-writing authority, is denied when it
  * tries to publish, gains publication through a second consent, changes
@@ -165,7 +165,7 @@ const created = await client.fetchProtected(site, {
   body: JSON.stringify({
     title: 'How AI agents are changing software development',
     excerpt: 'Delegation is becoming a first-class interface for the web.',
-    body: '## The shift\n\nAgents now act on our behalf inside real applications. The hard part is not capability — it is authority.\n\n- Scoped grants replace shared credentials\n- Enforcement lives on the website, not in the prompt\n- Every action leaves a signed receipt\n\nThe protocols being built today will decide whether that authority is meaningful.',
+    body: '## The shift\n\nAgents now act on our behalf inside real applications. The hard part is not capability - it is authority.\n\n- Scoped grants replace shared credentials\n- Enforcement lives on the website, not in the prompt\n- Every action leaves a signed receipt\n\nThe protocols being built today will decide whether that authority is meaningful.',
     tags: ['agents', 'software'],
   }),
 });

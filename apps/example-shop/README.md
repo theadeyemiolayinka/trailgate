@@ -2,8 +2,6 @@
 
 The TrailGate reference storefront: a working ecommerce site where AI agents can shop with explicit, scoped, user-approved delegation. Built on `@trailgate/server` for all protocol enforcement; the app supplies business logic, persistence, and the consent surface.
 
-Owner: D3 (see `internal/TEAM.md`).
-
 ## Stack
 
 Deliberately minimal, per `docs/decisions/0001`:
@@ -26,7 +24,7 @@ corepack pnpm dev             # serves http://127.0.0.1:3300
 
 The database (`data/example-shop.db`) is created, migrated, and seeded on first run. Seeded demo account:
 
-- Email: `ada@example.com` — Password: `demo-pass-1234` — Wallet: USD 250.00 (simulated)
+- Email: `ada@example.com` - Password: `demo-pass-1234` - Wallet: USD 250.00 (simulated)
 
 Ports and identity:
 
@@ -39,7 +37,7 @@ Ports and identity:
 | Disable seeding | `SHOP_SEED=0` | seeded |
 | Cert directory | `SHOP_CERTS_DIR` | `dev-certs/` |
 
-The issuer is the protocol identity the SDK signs URIs against (a bare https origin, per spec section 5.3). In plain-HTTP dev mode the transport is cleartext loopback while signed URIs carry the issuer identity — the same pattern as `packages/server/examples/photo-host.ts`.
+The issuer is the protocol identity the SDK signs URIs against (a bare https origin, per spec section 5.3). In plain-HTTP dev mode the transport is cleartext loopback while signed URIs carry the issuer identity - the same pattern as `packages/server/examples/photo-host.ts`.
 
 ## Try the agent flow
 
@@ -49,7 +47,7 @@ Terminal 1: `pnpm dev`. Terminal 2:
 corepack pnpm demo
 ```
 
-The script uses the real Agent SDK (`createAgentClient`) over real HTTP with a loopback transport that maps the https issuer onto the HTTP listener — request signatures verify exactly as they would over TLS. It requests a grant with `max_amount` and `cumulative_budget` constraints, prints a consent URL, and waits. Open the printed URL, sign in as the demo user, review the terms, and approve. The agent then browses the catalog, adds an item, places the order, pays (`tg.wallet.charge`), attempts a denied charge, and reads the wallet plus grant ledger state.
+The script uses the real Agent SDK (`createAgentClient`) over real HTTP with a loopback transport that maps the https issuer onto the HTTP listener - request signatures verify exactly as they would over TLS. It requests a grant with `max_amount` and `cumulative_budget` constraints, prints a consent URL, and waits. Open the printed URL, sign in as the demo user, review the terms, and approve. The agent then browses the catalog, adds an item, places the order, pays (`tg.wallet.charge`), attempts a denied charge, and reads the wallet plus grant ledger state.
 
 Constraint flags: `pnpm demo -- --budget 8000 --max 3000` (minor units).
 
@@ -61,7 +59,7 @@ rm -rf data dev-certs
 pnpm dev   # re-migrates and re-seeds deterministically
 ```
 
-## Judge walkthrough
+## Walkthrough
 
 `docs/DEMO.md` has the full 12-scenario demonstration guide with expected
 outcomes, reproducible setup, and an honest statement of guarantees.
@@ -69,7 +67,7 @@ outcomes, reproducible setup, and an honest statement of guarantees.
 ## What the site demonstrates
 
 - **Permission vocabulary**: `tg.catalog.read`, `tg.cart.read`, `tg.cart.write`, `tg.order.create`, `tg.order.read`, `tg.wallet.read`, `tg.wallet.charge`.
-- **Resource selectors**: `cart:cart_<user-id>`, `wallet:wlt_<user-id>`, `order:ord_<id>` — exact match, cross-user isolation enforced at stage 11 by a real ownership resolver.
+- **Resource selectors**: `cart:cart_<user-id>`, `wallet:wlt_<user-id>`, `order:ord_<id>` - exact match, cross-user isolation enforced at stage 11 by a real ownership resolver.
 - **Constraint enforcement**: the registered types (`max_amount`, `cumulative_budget`, `rate_limit`, `valid_window`, `spend_window`, `approval_threshold`) evaluated by the SDK against SQLite-backed ledger state; `reserve` runs the headroom check and insert inside one `BEGIN IMMEDIATE` transaction.
 - **Action catalog**: discovery advertises an `actions` list (`products.*`, `cart.*`, `orders.*`, `wallet.read`) generated from the same `tg.protect` declarations that enforce the routes, so agents can map intent to endpoints and permissions without out-of-band knowledge (spec section 5.2).
 - **The consent surface** (`/tg/consent`): renders requested and effective scope verbatim from the stored grant request (spec section 10.3), behind the site's own session auth and CSRF protection.
@@ -93,7 +91,7 @@ corepack pnpm test
 
 Covers: money handling, auth/sessions, cart, wallet accounting invariants (entries sum to balance), order lifecycle (create/pay/cancel/refund, stock, cross-user isolation), every SQLite port implementation (CAS transitions, atomic nonce claims, ledger reserve/consume/release/refund/TTL, idempotency conflicts, rate windows, audit), and an end-to-end suite driving the real Agent SDK through consent, scoped spending, budget denials, receipts, and revocation, all against the live enforcement pipeline.
 
-`src/milestone-a.test.ts` is the integration milestone: it spawns the real `server.ts` as a child process over real HTTP against a real SQLite file, then drives the stock Agent SDK through discovery (schema + action catalog), no-grant check, consent via the site's own login and CSRF form, redemption with `cnf.jkt` binding, a signed cart read with a verified receipt, and three denials (missing grant, out-of-scope permission, wrong key), finishing with audit and receipt assertions against the same database file.
+`src/live-e2e.test.ts` is the live integration proof: it spawns the real `server.ts` as a child process over real HTTP against a real SQLite file, then drives the stock Agent SDK through discovery (schema + action catalog), no-grant check, consent via the site's own login and CSRF form, redemption with `cnf.jkt` binding, a signed cart read with a verified receipt, and three denials (missing grant, out-of-scope permission, wrong key), finishing with audit and receipt assertions against the same database file.
 
 ## Layout
 
@@ -103,7 +101,7 @@ Covers: money handling, auth/sessions, cart, wallet accounting invariants (entri
 | `src/app.ts` | Route table: storefront UI, auth, consent, connections, protocol endpoints |
 | `src/api/routes.ts` | Agent JSON API; every route wrapped in `tg.protect` |
 | `src/tg/` | Site vocabulary (`vocabulary.ts`), SQLite port stores (`stores.ts`), SDK wiring (`server.ts`) |
-| `src/domain/` | users/auth, catalog, cart, orders, wallet — business logic only |
+| `src/domain/` | users/auth, catalog, cart, orders, wallet - business logic only |
 | `src/db/` | `node:sqlite` open/migrate, deterministic seed, id generation |
 | `src/ui/` | Page shell, components, per-page renderers; `public/app.css` design system |
 | `src/dev/` | `demo-agent.ts` walkthrough, `loopback.ts` dev transport |
@@ -111,7 +109,7 @@ Covers: money handling, auth/sessions, cart, wallet accounting invariants (entri
 
 ## Security notes and limitations
 
-- This is a reference app for an experimental protocol, not a production template. Private key material (the site signing JWK) is stored in the app database for demo continuity — a real deployment sources `signingKeys` from a KMS.
+- This is a reference app for an experimental protocol, not a production template. Private key material (the site signing JWK) is stored in the app database for demo continuity - a real deployment sources `signingKeys` from a KMS.
 - CSRF tokens are per-session; SameSite=Lax is a second layer, not the primary defense.
 - `grant_revocation` accepts agent self-revocation (a section 11 signed request carrying the grant being revoked, spec section 13) and the site's own UI calls `revokeGrant` directly. No `revocationAuthorizer` is configured, so unsigned external callers are denied.
 - Session cookie `Secure` is set only in TLS mode; HTTP dev mode omits it deliberately.

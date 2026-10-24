@@ -2,8 +2,6 @@
 
 Shared protocol foundations for TrailGate draft 0.1: typed errors, types, dependency ports, schema validation, discovery validation, grant parsing and verification, permission and constraint evaluation, RFC 9421 request-signature verification, request binding, and receipt verification.
 
-Owner: D0 (see `internal/TEAM.md`).
-
 Rules: `core` must not depend on any other TrailGate package, must not perform network access, and must not contain application-specific storage or ExampleShop logic.
 
 ## Status
@@ -14,15 +12,15 @@ Implemented against `spec/protocol.md` draft 0.1. Experimental. Not production-r
 
 Everything is exported from `src/index.ts`. The main entry points:
 
-- `verifyProtectedRequest(req, deps)` — the full section 11.3 verification pipeline. `req` is `{ method, url, headers, body? }`; `deps` injects all external state (see ports below). Returns `{ grant, requestDigest, signatureBase, idempotentReplay, context }` or throws a `TrailGateError` with a stable `tg.*` code.
-- `verifyGrant(token, deps)` / `parseGrant(token)` — grant JWS parsing and verification (JOSE `alg` allowlist `EdDSA`/`ES256`, `typ` check, `cnf.jkt`, issuer/audience/expiry claims, unknown `critical` members fail closed).
-- `validateDiscoveryDocument(doc, options)` / `parseDiscoveryDocument(text, options)` — schema, same-origin endpoint rules, `critical` handling, protocol-version negotiation.
-- `evaluateConstraints(constraints, ctx)` — conjunctive evaluation of the four registered constraint types; unknown types yield `tg.constraint.unknown_type`, unavailable evaluators yield `tg.internal.unavailable`.
-- `assertPermissionGranted` / `assertRequestedPermissionsKnown` — exact-match permission checks.
-- `buildReceiptPayload` / `signReceipt` / `verifyReceipt` — receipt construction, signing, and verification including optional `expectedRequestDigest` binding.
-- `signRequest(req, options)` — signs a request under the section 11.2 profile (fixed covered components, `tag: "trailgate"`). Provided for agents, fixtures, and conformance use.
-- `schemaRegistry()` — the JSON Schema 2020-12 validators loaded from `spec/schemas/` (`SCHEMA_IDS`).
-- `Codes` and `TrailGateError` — the stable error-code registry; `toErrorResponse(err)` produces the `{ "error": { code, message, detail? } }` envelope.
+- `verifyProtectedRequest(req, deps)` - the full section 11.3 verification pipeline. `req` is `{ method, url, headers, body? }`; `deps` injects all external state (see ports below). Returns `{ grant, requestDigest, signatureBase, idempotentReplay, context }` or throws a `TrailGateError` with a stable `tg.*` code.
+- `verifyGrant(token, deps)` / `parseGrant(token)` - grant JWS parsing and verification (JOSE `alg` allowlist `EdDSA`/`ES256`, `typ` check, `cnf.jkt`, issuer/audience/expiry claims, unknown `critical` members fail closed).
+- `validateDiscoveryDocument(doc, options)` / `parseDiscoveryDocument(text, options)` - schema, same-origin endpoint rules, `critical` handling, protocol-version negotiation.
+- `evaluateConstraints(constraints, ctx)` - conjunctive evaluation of the four registered constraint types; unknown types yield `tg.constraint.unknown_type`, unavailable evaluators yield `tg.internal.unavailable`.
+- `assertPermissionGranted` / `assertRequestedPermissionsKnown` - exact-match permission checks.
+- `buildReceiptPayload` / `signReceipt` / `verifyReceipt` - receipt construction, signing, and verification including optional `expectedRequestDigest` binding.
+- `signRequest(req, options)` - signs a request under the section 11.2 profile (fixed covered components, `tag: "trailgate"`). Provided for agents, fixtures, and conformance use.
+- `schemaRegistry()` - the JSON Schema 2020-12 validators loaded from `spec/schemas/` (`SCHEMA_IDS`).
+- `Codes` and `TrailGateError` - the stable error-code registry; `toErrorResponse(err)` produces the `{ "error": { code, message, detail? } }` envelope.
 
 ### Ports (injected dependencies)
 

@@ -1,8 +1,8 @@
 # Known limitations
 
 Draft 0.1, honestly stated. Each item names what is true today, not what is
-planned. See `docs/security-guarantees.md` for the guarantee model and
-`docs/release-review-0.1.md` for the test evidence behind what IS covered.
+planned. See `docs/security-guarantees.md` for the guarantee model and the
+test suite for the evidence behind what is covered.
 
 ## Protocol
 
@@ -50,5 +50,5 @@ planned. See `docs/security-guarantees.md` for the guarantee model and
 - **Demo credentials ship in the seed.** `ada@example.com` /
   `demo-pass-1234` is for local evaluation only.
 - **In-process test transport plus one live-HTTP test.** Most integration
-  tests call `app.handle` directly; `milestone-a.test.ts` is the spawn-real-
+  tests call `app.handle` directly; `live-e2e.test.ts` is the spawn-real-
   server proof. TLS mode is exercised manually via `pnpm certs`.

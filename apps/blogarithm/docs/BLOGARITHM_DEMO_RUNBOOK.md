@@ -38,7 +38,7 @@ Open `http://127.0.0.1:3401`. Sign in as `demo@blogarithm.dev` /
    - Step 7: publish succeeds; open the printed live URL.
    - Step 8-9: agent disables comments; the public comment form now
      rejects submissions (422).
-   - Step 10: delete attempt denied — settings permission is not delete.
+   - Step 10: delete attempt denied - settings permission is not delete.
    - Step 11: user revokes the grant (real access-page revoke); the next
      call returns `tg.grant.revoked`.
 5. Back in the browser, `Agent access` shows both grants, their

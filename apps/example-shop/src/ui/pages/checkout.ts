@@ -9,7 +9,7 @@ import type { RenderCtx } from '../render.ts';
 function addressOption(address: Address, selectedId: string | undefined): string {
   const selected = address.id === selectedId || (selectedId === undefined && address.isDefault);
   return `<option value="${esc(address.id)}"${selected ? ' selected' : ''}>${esc(
-    `${address.label} — ${address.line1}, ${address.city}`,
+    `${address.label} - ${address.line1}, ${address.city}`,
   )}</option>`;
 }
 

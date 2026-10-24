@@ -202,7 +202,7 @@ export interface GrantStatusResponse {
   /**
    * The site's current effective scope for the grant (grant_id lookups).
    * Reflects post-issuance scope changes the user or site made; advisory
-   * like the rest of status — enforcement remains authoritative.
+   * like the rest of status - enforcement remains authoritative.
    */
   permissions?: string[];
   resources?: string[];

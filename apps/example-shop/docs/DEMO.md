@@ -56,41 +56,41 @@ the script auto-approving through the real login + consent form.
 
 Expected output per step:
 
-1. **Discovery** — `GET /.well-known/trailgate` returns issuer,
+1. **Discovery** - `GET /.well-known/trailgate` returns issuer,
    advertised permissions, constraint types, and signing keys.
-2. **No grant** — `GET /api/products` unsigned returns
+2. **No grant** - `GET /api/products` unsigned returns
    `400 tg.request.malformed`. No grant token, no request considered.
-3. **Consent** — grant request asks for a narrow permission set
+3. **Consent** - grant request asks for a narrow permission set
    (`order.read` deliberately omitted), resource selectors
    (`cart:cart_usr_demo`, `wallet:wlt_usr_demo`,
    `order:ord_bill_seed01`), and two constraints
    (`max_amount` USD 60.00, `cumulative_budget` USD 120.00). Approval
    happens through the site's own login, CSRF-protected form, and
    `decideConsent`. The issued grant carries the effective terms.
-4. **Allowed** — catalog read and cart write succeed (200) and the
+4. **Allowed** - catalog read and cart write succeed (200) and the
    allowed response carries a verified `trailgate-receipt`.
-5. **Outside scope** — `GET /api/orders` returns
+5. **Outside scope** - `GET /api/orders` returns
    `403 tg.request.permission_denied` because `tg.order.read` was never
    granted. The denial itself is receipted and the receipt verifies.
-6. **Another user's resource** — `GET /api/orders/ord_bill_seed01`
+6. **Another user's resource** - `GET /api/orders/ord_bill_seed01`
    returns `403 tg.request.permission_denied`: the selector is in the
    grant but ownership resolution (`order:ord_bill_seed01` -> `usr_bill`,
    not the grant's subject `usr_demo`) fails at enforcement stage 11.
-7. **Tampered request** — the demo corrupts the request body after
+7. **Tampered request** - the demo corrupts the request body after
    signing. `400 tg.request.body_digest_mismatch`.
-8. **Over limit** — an 8900-minor-unit charge against `max_amount`
+8. **Over limit** - an 8900-minor-unit charge against `max_amount`
    6000: `403 tg.constraint.violated`, verified denial receipt.
-9. **Idempotency + concurrency** — two sequential `POST /api/orders`
+9. **Idempotency + concurrency** - two sequential `POST /api/orders`
    with the same `idempotency-key` return the same order id (stored
    outcome replay); two concurrent `pay` calls on one order yield
    exactly one wallet debit (the second sees an already-paid order).
-10. **Revocation** — the user revokes from the grant detail page;
+10. **Revocation** - the user revokes from the grant detail page;
     the very next signed request returns `403 tg.grant.revoked`.
-11. **Activity + receipts** — `/account/activity` shows the append-only
+11. **Activity + receipts** - `/account/activity` shows the append-only
     audit trail; `/account/receipts` lists stored receipt JWSs;
     the demo prints a verified receipt's claims
     (`decision=allowed`, grant id, audit id binding).
-12. **Tampered receipt** — a one-character edit to the JWS fails
+12. **Tampered receipt** - a one-character edit to the JWS fails
     `jws signature verification failed`.
 
 ## Protocol denial vs business failure

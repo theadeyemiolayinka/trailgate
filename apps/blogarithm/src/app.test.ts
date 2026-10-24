@@ -367,6 +367,7 @@ test('persistence: posts, comments, notifications survive a restart', () => {
     const db1 = openDatabase(dbPath);
     seedIfEmpty(db1);
     const app1 = createBlogApp(db1, { ...loadConfig(), issuer: ISSUER });
+    assert.ok(app1 !== undefined);
     const post = getPostBySlug(db1, 'why-delegated-authority-beats-shared-credentials');
     assert.ok(post !== undefined);
     const commentId = (

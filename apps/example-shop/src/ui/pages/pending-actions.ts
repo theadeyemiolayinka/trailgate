@@ -8,7 +8,7 @@ import { accountNav } from './account.ts';
 /**
  * Review surface for pending actions (spec section 12.5): the exact,
  * immutable proposal an agent queued. The page renders what the store
- * recorded at queue time — method, target, summary, parameters — and the
+ * recorded at queue time - method, target, summary, parameters - and the
  * decide form only carries the action id; the stored proposal cannot be
  * edited through this surface.
  */
@@ -57,10 +57,10 @@ export function renderPendingActions(records: PendingActionRecord[]): string {
       : `<div class="table-wrap"><table class="table"><thead><tr><th>Action</th><th>Type</th><th>Proposal</th><th class="num">Amount</th><th>Status</th><th>Queued</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   return `
 ${pageHead(
-    'Account',
-    'Agent approvals',
-    'Actions your agents proposed that need a human decision. Nothing listed here has executed yet; approving runs the exact proposal shown.',
-  )}
+  'Account',
+  'Agent approvals',
+  'Actions your agents proposed that need a human decision. Nothing listed here has executed yet; approving runs the exact proposal shown.',
+)}
 <div class="account-grid">
   ${accountNav('approvals')}
   <div class="stack">

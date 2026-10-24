@@ -85,8 +85,8 @@ export NODE_EXTRA_CA_CERTS=<repo>/apps/example-shop/dev-certs/ca.crt
 cd apps/claude-host && pnpm start "check my cart on https://localhost:3443"
 ```
 
-Status: implemented and typechecked; the live API call is untested in this
-environment because no API key is available. Adjust `ANTHROPIC_MODEL` if
+Status: implemented and typechecked; the live API call requires an
+`ANTHROPIC_API_KEY` in the environment. Adjust `ANTHROPIC_MODEL` if
 needed.
 
 ## Devin and other hosted agents
@@ -100,7 +100,7 @@ paths today:
 | --- | --- |
 | MCP stdio server (`trailgate-mcp`) with a local MCP host | Implemented and tested (initialize, tools/list, tools/call exercised end to end over live TLS) |
 | `trailgate` CLI | Implemented and tested over live TLS |
-| claude-host (Anthropic API, terminal) | Implemented; live API call unverified here |
+| claude-host (Anthropic API, terminal) | Implemented; requires `ANTHROPIC_API_KEY` |
 | Hosted agents (Devin etc.) | No verified path; requires the hosted runtime to support an MCP server it can spawn locally or a reachable remote endpoint |
 
 Do not expose the local MCP server as a remote endpoint to satisfy a

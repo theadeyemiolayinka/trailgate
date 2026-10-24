@@ -6,12 +6,7 @@ import type {
   TrailGateServer,
 } from '@trailgate/server';
 import type { Db } from '../db/database.ts';
-import {
-  deleteComment,
-  getComment,
-  listComments,
-  listCommentsForOwner,
-} from '../domain/comments.ts';
+import { deleteComment, listComments, listCommentsForOwner } from '../domain/comments.ts';
 import { listNotifications, markAllRead, markRead, unreadCount } from '../domain/notifications.ts';
 import {
   createDraft,
@@ -29,7 +24,7 @@ import {
   updatePost,
 } from '../domain/posts.ts';
 import { getUser, ValidationError } from '../domain/users.ts';
-import { commentSelector, postSelector } from '../tg/vocabulary.ts';
+import { postSelector } from '../tg/vocabulary.ts';
 
 /**
  * Agent-facing JSON API. Every route runs through `tg.protect`, so the

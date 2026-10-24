@@ -4,7 +4,7 @@ Status: accepted, 2026-10-23.
 
 ## Context
 
-TrailGate needs a language-neutral spec, several TypeScript SDK packages, a reference application, and cross-component test suites, developed in parallel by four owners with shared contracts between them.
+TrailGate needs a language-neutral spec, several TypeScript SDK packages, a reference application, and cross-component test suites, developed in parallel with shared contracts between them.
 
 ## Decision
 

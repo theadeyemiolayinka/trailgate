@@ -1,8 +1,7 @@
 /**
  * ExampleShop's TrailGate vocabulary. These are site-level choices: the
  * spec defines formats and semantics, the site defines the concrete
- * permission identifiers and resource selector types it advertises
- * (docs/handoff.md, D3 section).
+ * permission identifiers and resource selector types it advertises.
  */
 
 export const PERMISSIONS = [
