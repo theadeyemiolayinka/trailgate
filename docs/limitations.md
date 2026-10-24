@@ -8,9 +8,12 @@ planned. See `docs/security-guarantees.md` for the guarantee model and
 
 - **Experimental draft.** No certification, no formal verification, no
   production-readiness claim. The wire format may change before 1.0.
-- **Discovery documents are unsigned.** A network attacker could substitute
-  one off-path; same-origin endpoint pinning limits but does not eliminate
-  this. Signing is an open spec issue.
+- **Discovery trust is TOFU, not PKI.** Documents carry a
+  `trailgate-discovery-signature` header and agents pin `signing_keys`
+  across fetches, so substitution after first contact fails closed with
+  `tg.discovery.key_changed`. First contact still relies on TLS plus the
+  human consent check; a compromised CA at first contact is out of scope.
+  Sites that omit the signature header serve unsigned documents.
 - **`approval_threshold` decides per operation, not per policy.** A site
   wanting "approve once, then allow all 8900-charges for a day" must express
   that as application policy (stage 13), not a constraint.

@@ -234,11 +234,9 @@ async function protocolOrApi(
 ): Promise<HostResponse> {
   const path = new URL(req.url).pathname;
   if (path === '/.well-known/trailgate') {
-    return {
-      status: 200,
-      headers: { 'content-type': 'application/json', 'cache-control': 'max-age=300' },
-      body: ctx.tg.tg.discoveryDocument(),
-    };
+    const res = await ctx.tg.tg.handleDiscovery();
+    res.headers = { ...res.headers, 'cache-control': 'max-age=300' };
+    return res;
   }
   if (path === '/tg/grant-request') {
     return ctx.tg.tg.handleGrantRequest(req);

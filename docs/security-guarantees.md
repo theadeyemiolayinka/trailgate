@@ -112,7 +112,10 @@ any implementation. Run it against production stores before deploying.
   `HostRequest`/`HostResponse` boundary is the integration point.
 - Signed `grant_status` responses (permitted extension, not required; status is
   unsigned informational JSON and carries no authority).
-- Discovery document signing (relies on TLS + same-origin; open spec issue).
+- Discovery first-contact trust beyond TLS + human consent. Document
+  signatures and key-continuity pinning (spec 5.5) are implemented and fail
+  closed on unendorsed key changes; they detect substitution after first
+  contact but cannot bootstrap trust against a compromised CA at first fetch.
 - Grant refresh and post-issuance attenuation (open spec issues).
 - Transport-level DoS controls beyond request-size bounds: connection quotas,
   global rate shaping, and parser resource limits are the host/edge layer's job.

@@ -3,6 +3,7 @@ export const packageName = '@trailgate/core';
 export * from './constraints.ts';
 export * from './digest.ts';
 export * from './discovery.ts';
+export * from './discovery-signature.ts';
 export * from './errors.ts';
 export * from './grant.ts';
 export * from './jwk.ts';

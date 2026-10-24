@@ -32,6 +32,7 @@ runner.
 | Requirement (spec) | Evidence | Status |
 | --- | --- | --- |
 | Discovery document shape, same-origin endpoints, version list (5) | `packages/agent/src/discovery.test.ts` (malformed docs, cross-origin endpoint rejection, cache staleness), vectors | Covered |
+| Discovery signature verification and key-continuity pinning (5.5) | `packages/agent/src/discovery.test.ts` signature/rotation cases, `packages/server/src/discovery.test.ts` emission cases | Covered |
 | Unsupported protocol version fails closed, no guessing (5, errors) | `packages/agent/src/flow.test.ts`, vectors | Covered |
 | Action catalog optional, generated from enforcement declarations (5.2) | `packages/server` action tests, `milestone-a.test.ts` catalog assertions | Covered |
 | Grant request schema, unknown permission, unknown constraint type at intake (7, 9.2) | `milestone-b.test.ts` intake test, `enforcement.test.ts`, vectors | Covered |

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { Codes, TrailGateError, validateDiscoveryDocument } from '@trailgate/core';
+import {
+  Codes,
+  DISCOVERY_SIGNATURE_HEADER,
+  TrailGateError,
+  validateDiscoveryDocument,
+  verifyDiscoverySignatureToken,
+} from '@trailgate/core';
 import { generateEd25519KeyPair } from '@trailgate/test-fixtures';
 import { createTrailGateServer } from './server.ts';
 
@@ -36,6 +42,44 @@ describe('discovery document', () => {
       supportedProtocolVersions: ['0.1'],
     });
     assert.deepEqual(validated.endpoints, doc.endpoints);
+  });
+
+  it('emits a discovery signature that verifies over the exact body bytes', async () => {
+    const server = makeServer();
+    const res = await server.handleDiscovery();
+    assert.equal(res.status, 200);
+    assert.equal(typeof res.body, 'string');
+    const doc = JSON.parse(res.body as string) as { signing_keys: { keys: unknown[] } };
+    const header = res.headers?.[DISCOVERY_SIGNATURE_HEADER];
+    assert.ok(header !== undefined, 'discovery response carries the signature header');
+    const tokens = header.split(',');
+    assert.equal(tokens.length, 1);
+    const { kid } = await verifyDiscoverySignatureToken(
+      tokens[0] as string,
+      new TextEncoder().encode(res.body as string),
+      doc.signing_keys.keys as never,
+    );
+    assert.equal(kid, site.jkt);
+  });
+
+  it('emits one signature per configured signing key', async () => {
+    const second = generateEd25519KeyPair();
+    const server = makeServer({
+      signingKeys: [{ privateJwk: site.privateJwk }, { privateJwk: second.privateJwk }],
+    });
+    const res = await server.handleDiscovery();
+    const doc = JSON.parse(res.body as string) as { signing_keys: { keys: unknown[] } };
+    const header = res.headers?.[DISCOVERY_SIGNATURE_HEADER] as string;
+    const kids: string[] = [];
+    for (const token of header.split(',')) {
+      const { kid } = await verifyDiscoverySignatureToken(
+        token.trim(),
+        new TextEncoder().encode(res.body as string),
+        doc.signing_keys.keys as never,
+      );
+      kids.push(kid);
+    }
+    assert.deepEqual(kids.sort(), [site.jkt, second.jkt].sort());
   });
 
   it('honors custom paths, capabilities, and extensions', () => {

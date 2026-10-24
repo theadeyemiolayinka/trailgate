@@ -1,6 +1,11 @@
 import type { DiscoveryDocument } from '@trailgate/core';
-import { validateDiscoveryDocument } from '@trailgate/core';
+import {
+  DISCOVERY_SIGNATURE_HEADER,
+  signDiscoveryBody,
+  validateDiscoveryDocument,
+} from '@trailgate/core';
 import type { ResolvedServerConfig } from './config.ts';
+import type { HostResponse } from './types.ts';
 
 /**
  * Builds the discovery document served at `GET /.well-known/trailgate`
@@ -35,4 +40,27 @@ export function buildDiscoveryDocument(config: ResolvedServerConfig): DiscoveryD
     expectedOrigin: config.issuer,
     supportedProtocolVersions: [...config.supportedProtocolVersions],
   });
+}
+
+/**
+ * `GET /.well-known/trailgate` response (spec sections 5 and 5.5). The body
+ * is pre-serialized so `trailgate-discovery-signature` covers the exact
+ * bytes on the wire; hosts MUST send `body` verbatim. One detached JWS per
+ * configured signing key, comma-joined: while an outgoing key remains
+ * configured during rotation it still endorses the document for agents
+ * that pinned it.
+ */
+export async function buildDiscoveryResponse(config: ResolvedServerConfig): Promise<HostResponse> {
+  const body = JSON.stringify(buildDiscoveryDocument(config));
+  const signatures = await Promise.all(
+    config.signingKeys.map((key) => signDiscoveryBody(body, key)),
+  );
+  return {
+    status: 200,
+    headers: {
+      'content-type': 'application/json',
+      [DISCOVERY_SIGNATURE_HEADER]: signatures.join(','),
+    },
+    body,
+  };
 }

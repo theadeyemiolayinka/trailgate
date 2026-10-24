@@ -3,6 +3,8 @@ export type ErrorCode = `tg.${string}.${string}`;
 export const Codes = {
   DISCOVERY_INVALID: 'tg.discovery.invalid',
   DISCOVERY_UNSUPPORTED_VERSION: 'tg.discovery.unsupported_version',
+  DISCOVERY_SIGNATURE_INVALID: 'tg.discovery.signature_invalid',
+  DISCOVERY_KEY_CHANGED: 'tg.discovery.key_changed',
   GRANT_MALFORMED: 'tg.grant.malformed',
   GRANT_EXPIRED: 'tg.grant.expired',
   GRANT_REVOKED: 'tg.grant.revoked',
@@ -36,6 +38,8 @@ export type RegisteredCode = (typeof Codes)[keyof typeof Codes];
 const HTTP_STATUS: Record<RegisteredCode, number> = {
   'tg.discovery.invalid': 400,
   'tg.discovery.unsupported_version': 400,
+  'tg.discovery.signature_invalid': 400,
+  'tg.discovery.key_changed': 400,
   'tg.grant.malformed': 400,
   'tg.grant.expired': 403,
   'tg.grant.revoked': 403,

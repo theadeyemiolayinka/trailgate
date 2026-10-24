@@ -53,6 +53,7 @@ A grant carrying `approval_threshold` can deny a high-value request with `tg.con
 - Consent and lifecycle per section 10: S256 grant requests, redirect or polling completion, single-use redemption with client-side grant signature verification.
 - Protected requests per section 11: RFC 9421 profile headers, `Content-Digest`, `Idempotency-Key`, origin pinning (requests cannot leave the discovered site origin).
 - Receipts per section 14: verified against discovery keys and bound to the exact sent signature base; failures are reported, not thrown.
+- Discovery per section 5.5: `trailgate-discovery-signature` headers are verified when present, and the client pins `signing_keys` across fetches via the discovery cache. An unendorsed key change fails with `tg.discovery.key_changed`; legitimate rotation is endorsed by a signature under the outgoing key. `allowKeyRotation` on the client opts out.
 - Error envelopes per section 16: surfaced as typed data (`ProtectedResponse.error`, `TrailGateError.code`); branch on `code`, never `message`.
 
 ## What it does not do

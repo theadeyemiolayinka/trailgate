@@ -3,7 +3,7 @@ import { Codes, isTrailGateError, TrailGateError, toErrorResponse } from '@trail
 import { decideRequestApproval } from './approvals.ts';
 import type { ResolvedServerConfig, TrailGateServerOptions } from './config.ts';
 import { resolveConfig } from './config.ts';
-import { buildDiscoveryDocument } from './discovery.ts';
+import { buildDiscoveryDocument, buildDiscoveryResponse } from './discovery.ts';
 import { assertRequestLimits, createProtectedHandler } from './enforcement.ts';
 import {
   decideConsent,
@@ -37,6 +37,12 @@ export interface TrailGateServer {
   readonly config: ResolvedServerConfig;
   /** Discovery document for `GET /.well-known/trailgate`. Recomputed per call. */
   discoveryDocument(): DiscoveryDocument;
+  /**
+   * `GET /.well-known/trailgate` response with `trailgate-discovery-signature`
+   * headers (spec section 5.5). The body is pre-serialized; hosts MUST send
+   * it verbatim for signatures to verify.
+   */
+  handleDiscovery(): Promise<HostResponse>;
   /** `POST <endpoints.grant_request>` (spec section 10.2). */
   handleGrantRequest(req: HostRequest): Promise<HostResponse>;
   /** Verbatim terms for the host's consent page (spec section 10.3). */
@@ -106,6 +112,7 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
   return {
     config,
     discoveryDocument: () => buildDiscoveryDocument(config),
+    handleDiscovery: () => buildDiscoveryResponse(config),
     handleGrantRequest: async (req) => {
       try {
         assertRequestLimits(req, config);

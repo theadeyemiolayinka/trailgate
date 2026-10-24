@@ -106,6 +106,21 @@ Optional `actions` array: declarative descriptors of the site's protected routes
 
 Agents MUST validate the document against the schema before use, treat it as untrusted input, and honor `critical` per section 4. Documents SHOULD be cached for at most 24 hours unless HTTP caching headers say less; a site SHOULD send explicit cache headers. A document that fails validation MUST NOT be used and yields `tg.discovery.invalid`.
 
+### 5.5 Document signatures and key continuity
+
+TLS authenticates the transport, and the schema rules above authenticate shape, but nothing yet binds the document's *contents* to the site's own keys. This section defines the integrity and continuity layer.
+
+**Signature.** A site SHOULD emit a `trailgate-discovery-signature` response header on the discovery document. The value is one or more comma-joined detached compact JWS tokens of the form `protected..signature`; the JWS payload is the exact response body bytes, the protected header carries `alg`, `kid`, and `typ: "trailgate-discovery+jws"`, and `kid` MUST resolve to a member of the document's `signing_keys`. A site publishing multiple `signing_keys` SHOULD emit one token per key.
+
+An agent that receives the header MUST verify at least one token against the published `signing_keys`; if none verifies, the document MUST be rejected with `tg.discovery.signature_invalid`. Because the payload is the raw body, a signature detects any tampering with the bytes, including by caches or relays. When the header is absent the document is unsigned; agents MAY proceed but MUST treat it as lower assurance (no tamper-evidence, no rotation endorsement).
+
+**Key continuity.** A document signed by a key listed inside itself cannot bootstrap trust: an attacker who substitutes the document substitutes the keys too. The signature therefore matters in combination with pinning. An agent that has previously validated a site's document SHOULD pin the JWK thumbprints of its `signing_keys`. On a subsequent fetch where the key set differs, the agent MUST reject the document with `tg.discovery.key_changed` unless either:
+
+- a discovery signature verifies under a previously pinned key (the site endorsing its own rotation; this is why multiple tokens are emitted during a rotation window), or
+- the agent's operator or user explicitly re-verifies the site out of band and the agent is configured to permit the change.
+
+**Scope.** First contact relies on TLS plus the human consent step in section 10.3, which is the moment a person confirms the site identity. Signatures provide tamper-evidence for cached or relayed documents, and pinning provides continuity across fetches. Neither replaces Web PKI; a compromised CA on first contact remains out of scope for draft 0.1.
+
 ## 6. Grants
 
 ### 6.1 Representation

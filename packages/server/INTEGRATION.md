@@ -44,7 +44,7 @@ const tg = createTrailGateServer({
 
 | Host route | SDK call | Spec |
 | --- | --- | --- |
-| `GET /.well-known/trailgate` | `tg.discoveryDocument()` | section 5 |
+| `GET /.well-known/trailgate` | `tg.handleDiscovery()` | sections 5, 5.5 |
 | `POST /tg/grant-request` | `tg.handleGrantRequest(req)` | section 10.2 |
 | consent page (host UI) | `tg.getConsent(requestId)` then `tg.decideConsent(...)` | section 10.3 |
 | `POST /tg/grant-redemption` | `tg.handleRedemption(req)` | section 10.4 |
@@ -57,6 +57,12 @@ const tg = createTrailGateServer({
 `HostRequest` is `{ method, url, headers, body? }`. `url` must be the absolute
 request URI exactly as received; the request signature covers method,
 authority, path, and query. `headers` use lowercased names.
+
+`handleDiscovery` returns a pre-serialized string body so the
+`trailgate-discovery-signature` header covers the exact bytes on the wire:
+send `body` verbatim, never re-serialize it. The header carries one detached
+JWS per configured signing key, so during `rotateSigningKey` overlap an
+outgoing key still endorses the document for agents that pinned it.
 
 ## Consent integration
 

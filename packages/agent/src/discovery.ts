@@ -2,12 +2,15 @@ import type { Clock, DiscoveryDocument, Jwk, KeyResolver } from '@trailgate/core
 import {
   Codes,
   DISCOVERY_PATH,
+  DISCOVERY_SIGNATURE_HEADER,
   jwkThumbprint,
   negotiateProtocolVersion,
   SUPPORTED_PROTOCOL_VERSIONS,
+  signingKeyThumbprints,
   systemClock,
   TrailGateError,
   validateDiscoveryDocument,
+  verifyDiscoverySignatureToken,
 } from '@trailgate/core';
 import type { HttpTransport } from './transport.ts';
 import { fetchTransport } from './transport.ts';
@@ -39,6 +42,18 @@ export interface SiteContext {
    * Zero when the site sent `no-store`/`no-cache`.
    */
   readonly cacheMaxAgeSeconds: number;
+  /**
+   * True when the response carried `trailgate-discovery-signature` and at
+   * least one token verified against a published signing key (spec 5.5).
+   * Unsigned documents still parse and may be used, at lower assurance.
+   */
+  readonly signatureVerified: boolean;
+  /**
+   * Sorted JWK thumbprints of the document's `signing_keys`. The client
+   * pins them implicitly: pass the cached document's `signing_keys.keys`
+   * back as `pinnedSigningKeys` on the next fetch (spec section 5.5).
+   */
+  readonly keyThumbprints: readonly string[];
 }
 
 export interface DiscoverOptions {
@@ -48,6 +63,16 @@ export interface DiscoverOptions {
   knownCriticalFields?: readonly string[];
   /** Abort document parsing above this many bytes. Defaults to 64 KiB. */
   maxBodyBytes?: number;
+  /**
+   * The `signing_keys.keys` JWKs pinned by a previous validated fetch of
+   * this site (spec section 5.5). When the fetched document's key set
+   * differs, the fetch is rejected with `tg.discovery.key_changed` unless a
+   * discovery signature verifies under one of these keys (the outgoing key
+   * endorsing its own rotation) or `allowKeyRotation` is set.
+   */
+  pinnedSigningKeys?: readonly Jwk[];
+  /** Opt out of the key-continuity check for this fetch. Default false. */
+  allowKeyRotation?: boolean;
 }
 
 /**
@@ -118,6 +143,46 @@ export async function discoverSite(
       ? { knownCriticalFields: options.knownCriticalFields }
       : {}),
   });
+
+  const signatureHeader = res.headers[DISCOVERY_SIGNATURE_HEADER];
+  const pinnedJwks = options.pinnedSigningKeys ?? [];
+  const pinnedThumbprints = signingKeyThumbprints(pinnedJwks);
+  // Verification pool: the document's keys for tamper-evidence, plus pinned
+  // keys so a rotation endorsement signed by an outgoing key still verifies.
+  const keyPool = [...document.signing_keys.keys, ...pinnedJwks];
+  const verifiedThumbprints: string[] = [];
+  if (signatureHeader !== undefined) {
+    for (const token of signatureHeader.split(',')) {
+      try {
+        const { thumbprint } = await verifyDiscoverySignatureToken(token.trim(), res.body, keyPool);
+        verifiedThumbprints.push(thumbprint);
+      } catch {
+        // Individual tokens may reference retired keys; one valid is enough.
+      }
+    }
+    if (verifiedThumbprints.length === 0) {
+      throw new TrailGateError(
+        Codes.DISCOVERY_SIGNATURE_INVALID,
+        'no discovery signature verified against published signing keys',
+      );
+    }
+  }
+
+  const keyThumbprints = signingKeyThumbprints(document.signing_keys.keys);
+  if (
+    pinnedThumbprints.length > 0 &&
+    !sameSet(pinnedThumbprints, keyThumbprints) &&
+    options.allowKeyRotation !== true &&
+    !verifiedThumbprints.some((t) => pinnedThumbprints.includes(t))
+  ) {
+    throw new TrailGateError(
+      Codes.DISCOVERY_KEY_CHANGED,
+      'site signing keys changed without an endorsement signed by a previously pinned key; ' +
+        're-verify the site out of band or pass allowKeyRotation',
+      { previous: pinnedThumbprints, received: keyThumbprints },
+    );
+  }
+
   return {
     origin,
     issuer: document.issuer,
@@ -125,7 +190,17 @@ export async function discoverSite(
     document,
     fetchedAt: clock.now(),
     cacheMaxAgeSeconds: cacheMaxAge(res.headers),
+    signatureVerified: verifiedThumbprints.length > 0,
+    keyThumbprints,
   };
+}
+
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  const setB = new Set(b);
+  return a.every((item) => setB.has(item));
 }
 
 /**

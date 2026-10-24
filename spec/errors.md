@@ -16,6 +16,8 @@ Every error response uses the envelope in `spec/schemas/error.schema.json`:
 | --- | --- | --- | --- |
 | `tg.discovery.invalid` | 400 | Discovery document failed schema or origin-rule validation | Reject document; do not use any endpoint from it |
 | `tg.discovery.unsupported_version` | n/a | No common protocol version | Agent-side abort; never a server response |
+| `tg.discovery.signature_invalid` | n/a | `trailgate-discovery-signature` header present but no token verifies against published `signing_keys` | Reject document; possible tampering |
+| `tg.discovery.key_changed` | n/a | `signing_keys` changed without a signature endorsed by a previously pinned key | Reject document; re-verify the site out of band |
 | `tg.grant.malformed` | 400 | Grant is not a well-formed signed grant for this site | Deny |
 | `tg.grant.expired` | 403 | Grant `exp` or `valid_window` has passed | Deny; agent should discard the grant |
 | `tg.grant.revoked` | 403 | Grant is revoked | Deny; agent should discard the grant |

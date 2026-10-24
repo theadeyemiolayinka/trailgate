@@ -50,6 +50,12 @@ export interface AgentClientOptions {
   discoveryCache?: DiscoveryCache;
   /** Protocol versions this agent speaks. Defaults to `SUPPORTED_PROTOCOL_VERSIONS`. */
   protocolVersions?: readonly string[];
+  /**
+   * Permit site signing-key changes without a discovery signature endorsing
+   * them under a previously pinned key (spec section 5.5). Default false:
+   * an unendorsed key change fails with `tg.discovery.key_changed`.
+   */
+  allowKeyRotation?: boolean;
 }
 
 /**
@@ -204,6 +210,10 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
       transport,
       clock,
       supportedProtocolVersions: versions,
+      ...(cached !== undefined
+        ? { pinnedSigningKeys: cached.context.document.signing_keys.keys }
+        : {}),
+      ...(options.allowKeyRotation === true ? { allowKeyRotation: true } : {}),
     });
     discoveryCache.set(context.origin, {
       context,
