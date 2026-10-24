@@ -21,11 +21,12 @@ const SECURITY_HEADERS: Record<string, string> = {
   'referrer-policy': 'same-origin',
   'x-frame-options': 'DENY',
   'content-security-policy':
-    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'",
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 };
 
 const STATIC_MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -39,7 +40,12 @@ function staticFile(path: string): { filePath: string; type: string } | undefine
   if (!path.startsWith('/static/')) {
     return undefined;
   }
-  const rel = decodeURIComponent(path.slice('/static/'.length));
+  let rel: string;
+  try {
+    rel = decodeURIComponent(path.slice('/static/'.length));
+  } catch {
+    return undefined;
+  }
   if (rel === '' || rel.includes('..') || rel.includes('\0')) {
     return undefined;
   }

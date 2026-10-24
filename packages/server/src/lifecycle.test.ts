@@ -576,4 +576,38 @@ describe('post-issuance scope changes', () => {
       Codes.GRANT_UNKNOWN,
     );
   });
+
+  it('applies the site resourcePolicy to scope updates, same as intake', async () => {
+    const server = makeServer({
+      resourcePolicy: (selectors) => {
+        const bad = selectors.filter((s) => !s.startsWith('cart:'));
+        if (bad.length > 0) {
+          throw new TrailGateError(Codes.GRANT_SCOPE_REJECTED, 'selector outside namespace');
+        }
+      },
+    });
+    const jti = await issuedJti(server);
+    const ok = await server.updateGrantScope(jti, {
+      permissions: ['tg.cart.read'],
+      resources: ['cart:user_1'],
+      actor: 'user:user_1',
+    });
+    assert.deepEqual(ok.effectiveResources, ['cart:user_1']);
+    await assertCode(
+      server.updateGrantScope(jti, {
+        permissions: ['tg.cart.read'],
+        resources: ['wallet:user_1'],
+        actor: 'user:user_1',
+      }),
+      Codes.GRANT_SCOPE_REJECTED,
+    );
+    await assertCode(
+      server.updateGrantScope(jti, {
+        permissions: ['tg.cart.read'],
+        resources: ['cart:user_1', 42] as unknown as string[],
+        actor: 'user:user_1',
+      }),
+      Codes.REQUEST_MALFORMED,
+    );
+  });
 });

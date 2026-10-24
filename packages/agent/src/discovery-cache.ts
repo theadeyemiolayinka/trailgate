@@ -60,7 +60,7 @@ export class FileDiscoveryCache implements DiscoveryCache {
 
   set(origin: string, entry: DiscoveryCacheEntry): void {
     this.#entries.set(origin, entry);
-    mkdirSync(dirname(this.path), { recursive: true });
+    mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
     const tmp = `${this.path}.tmp`;
     writeFileSync(tmp, JSON.stringify({ entries: Object.fromEntries(this.#entries) }, null, 2));
     renameSync(tmp, this.path);

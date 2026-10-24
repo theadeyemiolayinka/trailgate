@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { GrantStore, StoredGrantRecord } from './store.ts';
 import { recordFromGrantToken } from './store.ts';
@@ -55,7 +55,9 @@ export class FileGrantStore implements GrantStore {
   }
 
   async #save(records: Map<string, StoredGrantRecord>): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
+    const dir = dirname(this.path);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await chmod(dir, 0o700).catch(() => undefined);
     const tmp = `${this.path}.tmp`;
     await writeFile(tmp, JSON.stringify([...records.values()]), {
       encoding: 'utf8',

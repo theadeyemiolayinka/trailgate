@@ -17,6 +17,7 @@ function makeApp(): ShopApp {
   seedIfEmpty(db);
   const config: ShopConfig = {
     issuer: ISSUER,
+    host: '127.0.0.1',
     httpPort: 0,
     tlsPort: 0,
     tls: false,
@@ -113,6 +114,30 @@ async function login(app: ShopApp): Promise<{ cookie: string; csrf: string }> {
 function appDb(app: ShopApp) {
   return app.db;
 }
+
+test('login throttles after repeated failures, then recovers on success', async () => {
+  const app = makeApp();
+  const attempt = () =>
+    post(
+      app,
+      '/login',
+      { 'content-type': 'application/x-www-form-urlencoded' },
+      formBody({ email: 'ada@example.com', password: 'wrong-password', next: '/' }),
+    );
+  for (let i = 0; i < 5; i += 1) {
+    assert.equal((await attempt()).status, 401);
+  }
+  const blocked = await attempt();
+  assert.equal(blocked.status, 429);
+  // The same throttle does not leak into a different account.
+  const other = await post(
+    app,
+    '/login',
+    { 'content-type': 'application/x-www-form-urlencoded' },
+    formBody({ email: 'ada@example.com ', password: 'demo-pass-1234', next: '/' }),
+  );
+  assert.equal(other.status, 429, 'normalized email stays throttled');
+});
 
 test('storefront: home, catalog, discovery document', async () => {
   const app = makeApp();
@@ -249,6 +274,10 @@ test('agent flow: consent, scoped spend, budget denial, revocation', async (t) =
   assert.equal(consentPage.status, 200);
   assert.ok(text(consentPage).includes('tg.wallet.charge'));
   assert.ok(text(consentPage).includes('90.00'));
+  // The live-sync script loads as a static file; an inline script would be
+  // blocked by the site CSP (script-src falls back to default-src 'self').
+  assert.ok(text(consentPage).includes('<script src="/static/consent.js" defer></script>'));
+  assert.ok(!text(consentPage).includes('<script>\n'));
 
   const approve = new URLSearchParams({
     _csrf: csrf,

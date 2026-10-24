@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Jwk } from '@trailgate/core';
 import type { AgentSigner } from './keys.ts';
@@ -97,7 +97,9 @@ export class FileKeyProvider implements AgentKeyProvider {
   }
 
   async #save(keys: Map<string, Jwk>): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
+    const dir = dirname(this.path);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await chmod(dir, 0o700).catch(() => undefined);
     const tmp = `${this.path}.tmp`;
     await writeFile(tmp, JSON.stringify(Object.fromEntries(keys)), {
       encoding: 'utf8',

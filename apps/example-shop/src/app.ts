@@ -211,7 +211,11 @@ export function createShopApp(db: Db, config: ShopConfig): ShopApp {
       try {
         const matched = router.match(req.method, req.path);
         if (matched === undefined) {
-          return render(ctx, req, { title: 'Not found', body: renderNotFound() });
+          return render(ctx, req, {
+            title: 'Not found',
+            status: 404,
+            body: renderNotFound(),
+          });
         }
         req.params = matched.params;
         return await matched.handler(req);
@@ -268,6 +272,40 @@ function nextPath(req: AppRequest, form: Record<string, string>): string {
   return local(form.next) ?? local(req.url.searchParams.get('next')) ?? '/';
 }
 
+const LOGIN_WINDOW_SECONDS = 600;
+const LOGIN_MAX_FAILURES = 5;
+
+/** Bounded in-memory throttle on failed sign-ins, keyed by normalized email. */
+function createLoginLimiter() {
+  const failures = new Map<string, { count: number; resetAt: number }>();
+  const key = (email: string) => email.trim().toLowerCase();
+  return {
+    throttled(email: string, now: number): boolean {
+      const entry = failures.get(key(email));
+      return entry !== undefined && entry.resetAt > now && entry.count >= LOGIN_MAX_FAILURES;
+    },
+    recordFailure(email: string, now: number): void {
+      if (failures.size > 10_000) {
+        for (const [k, v] of failures) {
+          if (v.resetAt <= now) {
+            failures.delete(k);
+          }
+        }
+      }
+      const k = key(email);
+      const entry = failures.get(k);
+      if (entry === undefined || entry.resetAt <= now) {
+        failures.set(k, { count: 1, resetAt: now + LOGIN_WINDOW_SECONDS });
+      } else {
+        entry.count += 1;
+      }
+    },
+    reset(email: string): void {
+      failures.delete(key(email));
+    },
+  };
+}
+
 function siteIdentity(ctx: Ctx) {
   return {
     name: 'ExampleShop',
@@ -282,6 +320,7 @@ function siteIdentity(ctx: Ctx) {
 function buildRoutes(ctx: Ctx): Router {
   const { db } = ctx;
   const router = new Router();
+  const loginLimiter = createLoginLimiter();
 
   const authed = (
     handler: (
@@ -1248,8 +1287,18 @@ function buildRoutes(ctx: Ctx): Router {
   router.post('/login', async (req) => {
     const form = parseForm(req);
     const next = nextPath(req, form);
+    const email = form.email ?? '';
+    const now = Math.floor(Date.now() / 1000);
+    if (loginLimiter.throttled(email, now)) {
+      return render(ctx, req, {
+        title: 'Sign in',
+        status: 429,
+        body: renderLogin({}, next, 'Too many sign-in attempts. Try again later.'),
+      });
+    }
     try {
-      const user = authenticate(db, form.email ?? '', form.password ?? '');
+      const user = authenticate(db, email, form.password ?? '');
+      loginLimiter.reset(email);
       const session = createSession(db, user.id);
       return {
         status: 303,
@@ -1264,6 +1313,7 @@ function buildRoutes(ctx: Ctx): Router {
       };
     } catch (err) {
       if (err instanceof AuthError) {
+        loginLimiter.recordFailure(email, now);
         return render(ctx, req, {
           title: 'Sign in',
           status: 401,

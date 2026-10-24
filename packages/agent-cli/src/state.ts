@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { PendingGrantRequest } from '@trailgate/agent';
 import { type AgentSigner, FileKeyProvider } from '@trailgate/agent';
@@ -32,7 +32,9 @@ async function readJsonFile(path: string): Promise<unknown> {
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
+  const dir = dirname(path);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await chmod(dir, 0o700).catch(() => undefined);
   const tmp = `${path}.tmp`;
   await writeFile(tmp, JSON.stringify(value), { encoding: 'utf8', mode: 0o600 });
   await rename(tmp, path);

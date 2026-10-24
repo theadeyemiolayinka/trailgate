@@ -192,29 +192,5 @@ export function renderConsent(
 
   <p class="consent-note">Approving issues a grant carrying exactly the selected terms. ExampleShop enforces them on every signed request; the agent cannot exceed them by changing what it sends. TrailGate is experimental; review before approving.</p>
 </div>
-<script>
-(function () {
-  var form = document.querySelector('.consent-form');
-  if (!form) return;
-  var permEcho = form.querySelector('[data-perm-echo]');
-  var durationEcho = form.querySelector('[data-duration-echo]');
-  var expiryEcho = form.querySelector('[data-expiry-echo]');
-  var approve = form.querySelector('[data-approve-btn]');
-  var select = form.querySelector('select[name="lifetime_seconds"]');
-  function sync() {
-    var labels = [];
-    var boxes = form.querySelectorAll('input[name="perm"]');
-    for (var i = 0; i < boxes.length; i++) {
-      if (boxes[i].checked) labels.push(boxes[i].getAttribute('data-label'));
-    }
-    if (permEcho) permEcho.textContent = labels.length > 0 ? labels.join(', ').toLowerCase() : 'nothing (approve is disabled)';
-    var seconds = Number(select.value);
-    if (durationEcho) durationEcho.textContent = select.options[select.selectedIndex].textContent;
-    if (expiryEcho) expiryEcho.textContent = new Date(Date.now() + seconds * 1000).toLocaleString();
-    if (approve) approve.disabled = labels.length === 0;
-  }
-  form.addEventListener('change', sync);
-  sync();
-})();
-</script>`;
+<script src="/static/consent.js" defer></script>`;
 }

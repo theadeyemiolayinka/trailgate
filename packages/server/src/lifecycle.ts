@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Constraint, GrantPayload, GrantRequestBody } from '@trailgate/core';
 import {
   assertRequestedPermissionsKnown,
@@ -429,7 +429,9 @@ export async function redeemGrant(
     throw new TrailGateError(Codes.AUTHORIZATION_DENIED, 'grant request is not approved');
   }
   const challenge = base64urlEncode(createHash('sha256').update(verifier, 'utf8').digest());
-  if (challenge !== record.body.code_challenge) {
+  const expected = Buffer.from(record.body.code_challenge, 'utf8');
+  const actual = Buffer.from(challenge, 'utf8');
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
     throw new TrailGateError(Codes.AUTHORIZATION_DENIED, 'code_verifier does not match');
   }
   const jti = randomId('grt');
@@ -611,6 +613,17 @@ export async function updateGrantScope(
         'constraints may only use types the site evaluates',
         { rejected: bad.map((c) => c.type) },
       );
+    }
+  }
+  if (input.resources !== undefined) {
+    if (
+      !Array.isArray(input.resources) ||
+      input.resources.some((r) => typeof r !== 'string' || r === '')
+    ) {
+      throw new TrailGateError(Codes.REQUEST_MALFORMED, 'resources must be a list of selectors');
+    }
+    if (config.resourcePolicy !== undefined) {
+      await config.resourcePolicy(input.resources);
     }
   }
   const updated = await config.stores.grants.updateScope(jti, {
