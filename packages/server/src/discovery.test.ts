@@ -52,6 +52,102 @@ describe('discovery document', () => {
     assert.equal(doc['x-site'], 'trailgate-demo');
   });
 
+  it('advertises protect()-declared actions derived from the route protection', () => {
+    const server = makeServer();
+    server.protect(
+      {
+        permission: 'tg.order.create',
+        mutating: false,
+        action: {
+          id: 'orders.create',
+          method: 'POST',
+          path: '/api/orders',
+          description: 'place an order',
+          resource: 'order:{id}',
+          spend: true,
+        },
+      },
+      () => ({ status: 200 }),
+    );
+    const doc = server.discoveryDocument();
+    const actions = doc.actions;
+    assert.equal(actions?.length, 1);
+    assert.deepEqual(actions?.[0], {
+      id: 'orders.create',
+      method: 'POST',
+      path: '/api/orders',
+      permission: 'tg.order.create',
+      description: 'place an order',
+      mutates: false,
+      resource: 'order:{id}',
+      spend: true,
+    });
+    const validated = validateDiscoveryDocument(doc, {
+      expectedOrigin: ISSUER,
+      supportedProtocolVersions: ['0.1'],
+    });
+    assert.equal(validated.actions?.length, 1);
+  });
+
+  it('rejects malformed or conflicting action declarations at protect() time', () => {
+    const server = makeServer();
+    assert.throws(
+      () =>
+        server.protect(
+          {
+            permission: 'tg.order.create',
+            action: { id: 'bad', method: 'post', path: '/x' },
+          },
+          () => ({ status: 200 }),
+        ),
+      (err: unknown) => err instanceof TrailGateError && err.code === Codes.INTERNAL_ERROR,
+    );
+    assert.throws(
+      () =>
+        server.protect(
+          {
+            permission: 'tg.order.create',
+            action: { id: 'bad2', method: 'POST', path: 'https://evil.example/x' },
+          },
+          () => ({ status: 200 }),
+        ),
+      (err: unknown) => err instanceof TrailGateError && err.code === Codes.INTERNAL_ERROR,
+    );
+    server.protect(
+      {
+        permission: 'tg.order.create',
+        action: { id: 'dup', method: 'GET', path: '/a' },
+      },
+      () => ({ status: 200 }),
+    );
+    assert.throws(
+      () =>
+        server.protect(
+          {
+            permission: 'tg.order.create',
+            action: { id: 'dup', method: 'POST', path: '/b' },
+          },
+          () => ({ status: 200 }),
+        ),
+      (err: unknown) => err instanceof TrailGateError && err.code === Codes.INTERNAL_ERROR,
+    );
+  });
+
+  it('rejects an action whose permission is outside the site vocabulary', () => {
+    const server = makeServer();
+    assert.throws(
+      () =>
+        server.protect(
+          {
+            permission: 'tg.wallet.charge',
+            action: { id: 'wallet.charge', method: 'POST', path: '/pay' },
+          },
+          () => ({ status: 200 }),
+        ),
+      (err: unknown) => err instanceof TrailGateError && err.code === Codes.INTERNAL_ERROR,
+    );
+  });
+
   it('rejects a non-https issuer at configuration time', () => {
     assert.throws(
       () =>

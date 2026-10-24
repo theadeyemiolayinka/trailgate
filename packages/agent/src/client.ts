@@ -8,10 +8,13 @@ import {
 } from '@trailgate/core';
 import type { AccessCheck, AccessCriteria } from './access.ts';
 import { checkAccessAsync } from './access.ts';
+import type { ActionCoverage } from './actions.ts';
+import { actionCoverage, siteActions } from './actions.ts';
 import type { ConsentCallbackExpectation } from './consent.ts';
 import { validateConsentCallback } from './consent.ts';
 import type { SiteContext } from './discovery.ts';
 import { discoverSite, originOf, siteKeyResolver } from './discovery.ts';
+import type { DiscoveryCache } from './discovery-cache.ts';
 import { errorFromResponse } from './errors.ts';
 import type {
   ConsentSession,
@@ -40,6 +43,11 @@ export interface AgentClientOptions {
   transport?: HttpTransport;
   clock?: Clock;
   grantStore?: GrantStore;
+  /**
+   * Discovery result cache (spec section 5.4). Defaults to an in-memory
+   * map; pass `FileDiscoveryCache` to persist across processes.
+   */
+  discoveryCache?: DiscoveryCache;
   /** Protocol versions this agent speaks. Defaults to `SUPPORTED_PROTOCOL_VERSIONS`. */
   protocolVersions?: readonly string[];
 }
@@ -56,12 +64,6 @@ export class AgentError extends Error {
     this.name = 'AgentError';
     this.kind = kind;
   }
-}
-
-interface DiscoveryCacheEntry {
-  context: SiteContext;
-  /** Unix seconds after which the cached document is stale. */
-  staleAt: number;
 }
 
 export interface FetchProtectedInput extends Omit<ProtectedRequestOptions, 'target'> {
@@ -146,6 +148,13 @@ export interface AgentClient {
    */
   checkAccess(target: string | SiteContext, criteria?: AccessCriteria): Promise<AccessCheck>;
   /**
+   * The site's advertised action catalog (spec section 5.2) annotated with
+   * local grant coverage: which actions stored grants plausibly cover right
+   * now, and which permission an uncovered action needs at consent time.
+   * Advisory for intent mapping; the server decides authorization.
+   */
+  listActions(target: string | SiteContext): Promise<ActionCoverage[]>;
+  /**
    * The product flow in one call: discover, check local access, and either
    * return the ready grant or start the consent flow and return the
    * session. Callers then await `awaitApproval` or complete the redirect.
@@ -183,7 +192,7 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
   const versions = options.protocolVersions ?? SUPPORTED_PROTOCOL_VERSIONS;
   const signers = new Map<string, AgentSigner>();
   const pending = new Map<string, PendingGrantRequest>();
-  const discoveryCache = new Map<string, DiscoveryCacheEntry>();
+  const discoveryCache: DiscoveryCache = options.discoveryCache ?? new Map();
 
   async function discover(target: string, opts?: { refresh?: boolean }): Promise<SiteContext> {
     const origin = originOf(target);
@@ -340,6 +349,16 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
             }
           : {}),
       });
+    },
+
+    async listActions(target): Promise<ActionCoverage[]> {
+      const context = await site(target);
+      return actionCoverage(
+        siteActions(context),
+        await store.list({ issuer: context.origin }),
+        context.issuer,
+        clock.now(),
+      );
     },
 
     async ensureGrant(target, scope, options) {

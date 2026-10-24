@@ -1,6 +1,12 @@
 import { join } from 'node:path';
 import type { AgentClient } from '@trailgate/agent';
-import { AgentError, createAgentClient, FileGrantStore, fetchTransport } from '@trailgate/agent';
+import {
+  AgentError,
+  createAgentClient,
+  FileDiscoveryCache,
+  FileGrantStore,
+  fetchTransport,
+} from '@trailgate/agent';
 import { isTrailGateError } from '@trailgate/core';
 import {
   dropPending,
@@ -25,6 +31,7 @@ async function defaultClientFactory(options: { stateDir: string }): Promise<Agen
   const client = createAgentClient({
     transport: fetchTransport(),
     grantStore: new FileGrantStore(join(options.stateDir, 'grants.json')),
+    discoveryCache: new FileDiscoveryCache(join(options.stateDir, 'discovery.json')),
   });
   const { stateDir } = options;
   for (const signer of await loadSigners(stateDir)) {
@@ -91,7 +98,8 @@ function usage(): string {
     'trailgate - developer CLI for the TrailGate agent SDK',
     '',
     'commands:',
-    '  discover <url>                                validate and print site capabilities',
+    '  discover <url> [--refresh]                    validate and print site capabilities and actions',
+    '  actions <url>                                 list advertised actions with local grant coverage',
     '  keygen [--alg ed25519|p256]                   generate a signing key into the state dir',
     '  keys                                          list stored key thumbprints',
     '  request <url> --permission p [--permission q]',
@@ -106,7 +114,7 @@ function usage(): string {
     '       [--grant-id jti] [--permission p] [--idempotency-key k]',
     '                                               send a signed request to a same-origin target',
     '  grants [--issuer origin]                      list stored grants',
-    '  revoke <url> --grant-id jti [--reason r]      revoke a grant (provisional endpoint)',
+    '  revoke <url> --grant-id jti [--reason r]      revoke a grant via the signed endpoint',
     '',
     'options:',
     '  --state-dir <dir>   where keys.json, pending.json, grants.json live (default .trailgate)',
@@ -180,7 +188,7 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
           return 2;
         }
         const client = await (deps.clientFactory ?? defaultClientFactory)({ stateDir });
-        const ctx = await client.discover(url);
+        const ctx = await client.discover(url, { refresh: parsed.flags.has('refresh') });
         print({
           issuer: ctx.issuer,
           origin: ctx.origin,
@@ -189,7 +197,34 @@ export async function runCli(argv: string[], deps: CliDeps = {}): Promise<number
           permissions: ctx.document.permissions,
           constraintTypes: ctx.document.constraint_types,
           capabilities: ctx.document.capabilities ?? {},
+          actions: ctx.document.actions ?? [],
         });
+        return 0;
+      }
+
+      case 'actions': {
+        const url = rest[0];
+        if (url === undefined) {
+          stderr('actions requires a site url');
+          return 2;
+        }
+        const client = await (deps.clientFactory ?? defaultClientFactory)({ stateDir });
+        const coverage = await client.listActions(url);
+        print(
+          coverage.map((entry) => ({
+            id: entry.action.id,
+            method: entry.action.method,
+            path: entry.action.path,
+            permission: entry.action.permission,
+            description: entry.action.description,
+            mutates: entry.action.mutates ?? true,
+            resource: entry.action.resource,
+            spend: entry.action.spend,
+            covered: entry.covered,
+            grant: entry.grant?.jti,
+            missing: entry.missing,
+          })),
+        );
         return 0;
       }
 

@@ -217,22 +217,45 @@ export function createAgentApi(
     {
       method: 'GET',
       pattern: '/api/products',
-      handle: tg.protect({ permission: 'tg.catalog.read', mutating: false }, async () =>
-        json(200, {
-          products: listProducts(db).map((p) => productView(p)),
-        }),
+      handle: tg.protect(
+        {
+          permission: 'tg.catalog.read',
+          mutating: false,
+          action: {
+            id: 'products.list',
+            method: 'GET',
+            path: '/api/products',
+            description: 'list the product catalog',
+          },
+        },
+        async () =>
+          json(200, {
+            products: listProducts(db).map((p) => productView(p)),
+          }),
       ),
     },
     {
       method: 'GET',
       pattern: '/api/products/:sku',
-      handle: tg.protect({ permission: 'tg.catalog.read', mutating: false }, async (req) => {
-        const sku = param(paramsOf(req, '/api/products/:sku'), 'sku');
-        const product = getProduct(db, sku);
-        return product === undefined
-          ? err(404, 'shop.product.not_found', 'unknown product')
-          : json(200, productView(product));
-      }),
+      handle: tg.protect(
+        {
+          permission: 'tg.catalog.read',
+          mutating: false,
+          action: {
+            id: 'products.read',
+            method: 'GET',
+            path: '/api/products/{sku}',
+            description: 'read one product by sku',
+          },
+        },
+        async (req) => {
+          const sku = param(paramsOf(req, '/api/products/:sku'), 'sku');
+          const product = getProduct(db, sku);
+          return product === undefined
+            ? err(404, 'shop.product.not_found', 'unknown product')
+            : json(200, productView(product));
+        },
+      ),
     },
     {
       method: 'GET',
@@ -245,6 +268,13 @@ export function createAgentApi(
             return subject === undefined ? undefined : cartSelector(subject);
           },
           mutating: false,
+          action: {
+            id: 'cart.read',
+            method: 'GET',
+            path: '/api/cart',
+            description: 'read the items and total in your shopping cart',
+            resource: 'cart:{user}',
+          },
         },
         async (_req, ctx) => json(200, cartView(db, requireSubject(ctx))),
       ),
@@ -258,6 +288,13 @@ export function createAgentApi(
           resource: (req) => {
             const subject = subjectOf(req);
             return subject === undefined ? undefined : cartSelector(subject);
+          },
+          action: {
+            id: 'cart.items.set',
+            method: 'POST',
+            path: '/api/cart/items',
+            description: 'add an item to the cart or change its quantity (body: {sku, qty})',
+            resource: 'cart:{user}',
           },
         },
         async (req, ctx) => {
@@ -294,6 +331,13 @@ export function createAgentApi(
             const subject = subjectOf(req);
             return subject === undefined ? undefined : cartSelector(subject);
           },
+          action: {
+            id: 'cart.items.remove',
+            method: 'DELETE',
+            path: '/api/cart/items/{sku}',
+            description: 'remove an item from the cart',
+            resource: 'cart:{user}',
+          },
         },
         async (req, ctx) => {
           const subject = requireSubject(ctx);
@@ -313,37 +357,60 @@ export function createAgentApi(
     {
       method: 'GET',
       pattern: '/api/orders',
-      handle: tg.protect({ permission: 'tg.order.read', mutating: false }, async (_req, ctx) => {
-        const subject = requireSubject(ctx);
-        const orders = listOrders(db, subject).map((order) => ({
-          id: order.id,
-          status: order.status,
-          total: order.total,
-          placed_via: order.placedVia,
-          created_at: order.createdAt,
-          selector: orderSelector(order.id),
-        }));
-        return json(200, { orders });
-      }),
+      handle: tg.protect(
+        {
+          permission: 'tg.order.read',
+          mutating: false,
+          action: {
+            id: 'orders.list',
+            method: 'GET',
+            path: '/api/orders',
+            description: 'list your orders',
+          },
+        },
+        async (_req, ctx) => {
+          const subject = requireSubject(ctx);
+          const orders = listOrders(db, subject).map((order) => ({
+            id: order.id,
+            status: order.status,
+            total: order.total,
+            placed_via: order.placedVia,
+            created_at: order.createdAt,
+            selector: orderSelector(order.id),
+          }));
+          return json(200, { orders });
+        },
+      ),
     },
     {
       method: 'POST',
       pattern: '/api/orders',
-      handle: tg.protect({ permission: 'tg.order.create' }, async (_req, ctx) => {
-        const subject = requireSubject(ctx);
-        try {
-          const order = createOrderFromCart(db, subject, {
-            placedVia: 'agent',
-            grantJti: ctx.grant.jti,
-          });
-          return json(201, orderView(db, order.id));
-        } catch (e) {
-          if (e instanceof OrderError) {
-            return err(400, 'shop.order.invalid', e.message);
+      handle: tg.protect(
+        {
+          permission: 'tg.order.create',
+          action: {
+            id: 'orders.create',
+            method: 'POST',
+            path: '/api/orders',
+            description: 'create an order from the current cart contents (checkout)',
+          },
+        },
+        async (_req, ctx) => {
+          const subject = requireSubject(ctx);
+          try {
+            const order = createOrderFromCart(db, subject, {
+              placedVia: 'agent',
+              grantJti: ctx.grant.jti,
+            });
+            return json(201, orderView(db, order.id));
+          } catch (e) {
+            if (e instanceof OrderError) {
+              return err(400, 'shop.order.invalid', e.message);
+            }
+            throw e;
           }
-          throw e;
-        }
-      }),
+        },
+      ),
     },
     {
       method: 'GET',
@@ -356,6 +423,13 @@ export function createAgentApi(
             return id === undefined ? undefined : orderSelector(id);
           },
           mutating: false,
+          action: {
+            id: 'orders.read',
+            method: 'GET',
+            path: '/api/orders/{id}',
+            description: 'read one order by id',
+            resource: 'order:{id}',
+          },
         },
         async (req, ctx) => {
           const subject = requireSubject(ctx);
@@ -378,6 +452,13 @@ export function createAgentApi(
             return id === undefined ? undefined : orderSelector(id);
           },
           mutating: false,
+          action: {
+            id: 'orders.invoice',
+            method: 'GET',
+            path: '/api/orders/{id}/invoice',
+            description: 'read the invoice and billing details for an order',
+            resource: 'order:{id}',
+          },
         },
         async (req, ctx) => {
           const subject = requireSubject(ctx);
@@ -409,6 +490,14 @@ export function createAgentApi(
               return undefined;
             }
             return getOrder(db, id)?.total;
+          },
+          action: {
+            id: 'orders.pay',
+            method: 'POST',
+            path: '/api/orders/{id}/pay',
+            description: 'pay an order total from your wallet balance',
+            resource: 'wallet:{user}',
+            spend: true,
           },
         },
         async (req, ctx) => {
@@ -452,6 +541,13 @@ export function createAgentApi(
             return subject === undefined ? undefined : walletSelector(subject);
           },
           mutating: false,
+          action: {
+            id: 'wallet.read',
+            method: 'GET',
+            path: '/api/wallet',
+            description: 'read wallet balance, ledger entries, and spend under this grant',
+            resource: 'wallet:{user}',
+          },
         },
         async (_req, ctx) => {
           const subject = requireSubject(ctx);

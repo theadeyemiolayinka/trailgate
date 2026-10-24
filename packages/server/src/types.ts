@@ -90,6 +90,27 @@ export interface GrantStatusResponse {
  * in integer minor units, used for `max_amount`/`cumulative_budget`
  * evaluation and the reservation lifecycle (spec sections 9 and 12).
  */
+/**
+ * Advertisement of this route in the discovery document's `actions` catalog
+ * (spec section 5.2). The SDK derives `permission` and `mutates` from the
+ * same `RouteProtection` that drives enforcement, so the advertisement can
+ * never drift from what the pipeline actually requires.
+ */
+export interface ActionAdvertisement {
+  /** Stable action identifier, unique within the site's catalog. */
+  id: string;
+  /** Uppercase HTTP method of the protected route. */
+  method: string;
+  /** Absolute path template; `{name}` marks a path parameter. */
+  path: string;
+  /** Short statement of what the action does, for humans and models. */
+  description?: string;
+  /** Resource selector template, e.g. `cart:{user}`; names structure, never data. */
+  resource?: string;
+  /** When true, the action may charge money and spend constraints apply. */
+  spend?: boolean;
+}
+
 export interface RouteProtection {
   permission: string;
   resource?: string | ((req: HostRequest) => string | undefined);
@@ -100,6 +121,8 @@ export interface RouteProtection {
    * endpoints may set `false` to skip dedupe storage.
    */
   mutating?: boolean;
+  /** When set, the route is advertised in discovery `actions`. */
+  action?: ActionAdvertisement;
 }
 
 /** Request context passed to the host handler after a request verifies. */

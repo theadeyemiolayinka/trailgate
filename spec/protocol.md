@@ -83,6 +83,19 @@ Schema: `spec/schemas/discovery.schema.json`. Required fields:
 
 Optional `capabilities` object: `supports_redirect` (boolean), `supports_receipts_unsigned` (boolean, default false), `max_grant_seconds` (integer ceiling on grant lifetime), `rate_limits` (site-wide defaults, informational).
 
+Optional `actions` array: declarative descriptors of the site's protected routes, so an agent can map intent ("check my cart") to a concrete signed request before holding a grant. Action descriptors are advisory metadata: they carry no authority, authorize nothing by themselves, and are never a substitute for the section 11 pipeline. A site that advertises an action MUST enforce the declared permission on the named route, and MUST keep the descriptor consistent with the route's actual protection (a descriptor that names a permission the route does not enforce is a conformance bug, not an escalation path). Agents MUST treat every entry as untrusted site input until the document validates per section 5.4.
+
+| Member | Required | Meaning |
+| --- | --- | --- |
+| `id` | yes | Stable action identifier (for example `cart.read`); unique within the document. |
+| `method` | yes | Uppercase HTTP method of the protected route. |
+| `path` | yes | Absolute path template. `{name}` marks a path parameter the caller substitutes; all other segments are literal. The substituted path MUST resolve inside the site origin. |
+| `permission` | yes | The `tg.*` permission the request must hold; MUST appear in the document's `permissions`. |
+| `description` | no | Short statement of what the action does, for humans and models. |
+| `mutates` | no | Whether the action changes state. When absent, agents MUST treat the action as mutating (the safe default). |
+| `resource` | no | Resource selector template the action touches (for example `cart:{user}`); `{user}` denotes the subject-derived part resolved at enforcement. |
+| `spend` | no | When true, the action may charge money, so spend constraints such as `max_amount`, `cumulative_budget`, or `spend_window` can deny it. |
+
 ### 5.3 Origin rules
 
 - `issuer` MUST equal the discovery document's origin exactly (scheme, host, port).

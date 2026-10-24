@@ -62,6 +62,10 @@
       },
       "additionalProperties": true
     },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    },
     "critical": {
       "type": "array",
       "items": { "type": "string" },
@@ -70,6 +74,21 @@
   },
   "additionalProperties": true,
   "$defs": {
+    "action": {
+      "type": "object",
+      "required": ["id", "method", "path", "permission"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "pattern": "^[A-Z]+$" },
+        "path": { "type": "string", "pattern": "^/" },
+        "permission": { "$ref": "#/$defs/permission" },
+        "description": { "type": "string" },
+        "mutates": { "type": "boolean" },
+        "resource": { "type": "string", "minLength": 1 },
+        "spend": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
     "permission": {
       "type": "string",
       "pattern": "^tg\\.[a-z0-9_]+(\\.[a-z0-9_]+)+$"

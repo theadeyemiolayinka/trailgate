@@ -39,8 +39,20 @@ function fakeSite(agentJkt: { value?: string }) {
       requests.push(req);
       const url = new URL(req.url);
       if (url.pathname === '/.well-known/trailgate') {
-        const doc = makeDiscovery() as { signing_keys: { keys: Jwk[] } };
+        const doc = makeDiscovery() as {
+          signing_keys: { keys: Jwk[] };
+          actions: unknown[];
+        };
         doc.signing_keys = { keys: [siteKey.publicJwk] };
+        doc.actions = [
+          {
+            id: 'orders.create',
+            method: 'POST',
+            path: '/api/orders',
+            permission: 'tg.order.create',
+            spend: true,
+          },
+        ];
         return jsonResponse(200, doc);
       }
       if (url.pathname === '/tg/grant-request') {
@@ -145,6 +157,21 @@ describe('cli commands', () => {
     assert.equal(summary.issuer, ORIGIN);
     assert.equal(summary.protocolVersion, '0.1');
     assert.deepEqual(summary.permissions, ['tg.cart.read', 'tg.order.create', 'tg.wallet.charge']);
+  });
+
+  it('actions lists the advertised catalog with coverage', async () => {
+    const { run } = await setup();
+    const empty = await run(['actions', ORIGIN]);
+    assert.equal(empty.code, 0, empty.stderr);
+    const uncovered = JSON.parse(empty.stdout) as { id: string; covered: boolean }[];
+    assert.equal(uncovered[0]?.id, 'orders.create');
+    assert.equal(uncovered[0]?.covered, false);
+
+    await run(['request', ORIGIN, '--permission', 'tg.order.create', '--wait']);
+    const covered = await run(['actions', ORIGIN]);
+    const list = JSON.parse(covered.stdout) as { id: string; covered: boolean; grant?: string }[];
+    assert.equal(list[0]?.covered, true);
+    assert.ok(list[0]?.grant !== undefined);
   });
 
   it('request submits, persists pending, wait redeems and stores the grant', async () => {

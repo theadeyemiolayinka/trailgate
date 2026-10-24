@@ -70,7 +70,8 @@ outcomes, reproducible setup, and an honest statement of guarantees.
 
 - **Permission vocabulary**: `tg.catalog.read`, `tg.cart.read`, `tg.cart.write`, `tg.order.create`, `tg.order.read`, `tg.wallet.read`, `tg.wallet.charge`.
 - **Resource selectors**: `cart:cart_<user-id>`, `wallet:wlt_<user-id>`, `order:ord_<id>` — exact match, cross-user isolation enforced at stage 11 by a real ownership resolver.
-- **Constraint enforcement**: all four registered types (`max_amount`, `cumulative_budget`, `rate_limit`, `valid_window`) evaluated by the SDK against SQLite-backed ledger state; `reserve` runs the headroom check and insert inside one `BEGIN IMMEDIATE` transaction.
+- **Constraint enforcement**: the registered types (`max_amount`, `cumulative_budget`, `rate_limit`, `valid_window`, `spend_window`) evaluated by the SDK against SQLite-backed ledger state; `reserve` runs the headroom check and insert inside one `BEGIN IMMEDIATE` transaction.
+- **Action catalog**: discovery advertises an `actions` list (`products.*`, `cart.*`, `orders.*`, `wallet.read`) generated from the same `tg.protect` declarations that enforce the routes, so agents can map intent to endpoints and permissions without out-of-band knowledge (spec section 5.2).
 - **The consent surface** (`/tg/consent`): renders requested and effective scope verbatim from the stored grant request (spec section 10.3), behind the site's own session auth and CSRF protection.
 - **User inspection and revocation**: `/account/connections` lists issued grants with scope detail and revokes via `tg.revokeGrant` (effective next request); `/account/activity` renders the append-only audit trail and agent-placed orders.
 - **Simulated wallet, real accounting**: append-only entries, transactional balance updates, refunds that post offsetting grant-ledger entries (spec section 12). Clearly labeled as simulated; no real funds move.
@@ -90,7 +91,9 @@ With certs present, the issuer origin is real TLS: browsers can reach consent UR
 corepack pnpm test
 ```
 
-Covers: money handling, auth/sessions, cart, wallet accounting invariants (entries sum to balance), order lifecycle (create/pay/cancel/refund, stock, cross-user isolation), every SQLite port implementation (CAS transitions, atomic nonce claims, ledger reserve/consume/release/refund/TTL, idempotency conflicts, rate windows, audit), and an end-to-end suite driving the real Agent SDK through consent, scoped spending, budget denials, receipts, and revocation — all against the live enforcement pipeline.
+Covers: money handling, auth/sessions, cart, wallet accounting invariants (entries sum to balance), order lifecycle (create/pay/cancel/refund, stock, cross-user isolation), every SQLite port implementation (CAS transitions, atomic nonce claims, ledger reserve/consume/release/refund/TTL, idempotency conflicts, rate windows, audit), and an end-to-end suite driving the real Agent SDK through consent, scoped spending, budget denials, receipts, and revocation, all against the live enforcement pipeline.
+
+`src/milestone-a.test.ts` is the integration milestone: it spawns the real `server.ts` as a child process over real HTTP against a real SQLite file, then drives the stock Agent SDK through discovery (schema + action catalog), no-grant check, consent via the site's own login and CSRF form, redemption with `cnf.jkt` binding, a signed cart read with a verified receipt, and three denials (missing grant, out-of-scope permission, wrong key), finishing with audit and receipt assertions against the same database file.
 
 ## Layout
 

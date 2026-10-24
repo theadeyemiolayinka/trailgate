@@ -103,7 +103,10 @@ whole spec section 11.3 checklist, then:
   (`mutating: false` opts out for read-only endpoints),
 - reserves `amount` against `cumulative_budget` and `spend_window` headroom
   when the route declares one, consumes on a handler response below 400,
-  releases on a throw or a 400+,
+  releases on a throw or a 400+. The reservation window covers the entire
+  handler, so every domain call the handler makes runs inside the enforced
+  boundary; handlers read the verified `ctx.subject` and `ctx.grant` rather
+  than re-parsing request tokens deeper in the call graph,
 - returns a signed receipt in the `trailgate-receipt` response header
   (spec section 14.1),
 - returns signed denial receipts when the request was parseable enough to
@@ -112,6 +115,37 @@ whole spec section 11.3 checklist, then:
 Denials return the spec error envelope
 (`{ "error": { "code", "message", "detail?" } }`) with the registry's advisory
 HTTP status.
+
+### Advertising the route in discovery
+
+Pass `action` on the same `RouteProtection` to publish the route in the
+discovery document's `actions` catalog (spec section 5.2):
+
+```ts
+const chargeWallet = tg.protect(
+  {
+    permission: 'tg.wallet.charge',
+    amount: (req) => parseAmount(req),
+    action: {
+      id: 'orders.pay',                      // stable, unique within the site
+      method: 'POST',
+      path: '/api/orders/{id}/pay',          // {name} marks a path parameter
+      description: 'pay an order from the wallet',
+      resource: 'wallet:{user}',             // selector template, never data
+      spend: true,
+    },
+  },
+  handler,
+);
+```
+
+`permission` and `mutates` in the advertised descriptor are derived from the
+same declaration the pipeline enforces, so the catalog cannot drift from
+authorization. `protect` throws at startup for malformed descriptors,
+duplicate ids, or a permission outside the site's `permissions` vocabulary.
+Advertise structure only: `path` and `resource` templates MUST NOT carry
+per-user identifiers, because discovery is public. Actions are advisory to
+agents; enforcement is unaffected whether a route advertises or not.
 
 ## Configuration reference
 

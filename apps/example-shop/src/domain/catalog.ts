@@ -1,6 +1,5 @@
 import type { Money } from '@trailgate/core';
 import type { Db } from '../db/database.ts';
-import { money } from './money.ts';
 
 export interface Product {
   sku: string;

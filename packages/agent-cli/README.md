@@ -10,7 +10,8 @@ Status: Phase 2 foundation on `@trailgate/agent`. Experimental; not production r
 
 ```sh
 trailgate keygen                              # new signing key in ./.trailgate/keys.json
-trailgate discover https://shop.example.com   # validated capabilities
+trailgate discover https://shop.example.com   # validated capabilities + actions
+trailgate actions https://shop.example.com    # action catalog with grant coverage
 trailgate request https://shop.example.com \
     --permission tg.order.create --wait       # consent flow, poll + redeem
 trailgate fetch https://shop.example.com /api/orders --method POST
@@ -21,7 +22,7 @@ trailgate revoke https://shop.example.com --grant-id <jti>
 
 `request` prints a `consent_url`; the user approves on the site's own surface. `--wait` polls `grant_status` and redeems automatically. Without `--wait`, approve then run `redeem <url> --request-id <id>`.
 
-`--state-dir <dir>` (default `./.trailgate`) selects where `keys.json`, `pending.json`, and `grants.json` live.
+`--state-dir <dir>` (default `./.trailgate`) selects where `keys.json`, `pending.json`, `grants.json`, and `discovery.json` (the action-catalog cache, refreshed when stale) live.
 
 ## State files
 

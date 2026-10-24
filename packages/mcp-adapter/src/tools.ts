@@ -144,7 +144,7 @@ export function createTrailGateTools(
     {
       name: 'trailgate.discover',
       description:
-        "Discover a site's TrailGate support and return its validated capabilities. Fails when the site does not implement the protocol.",
+        "Discover a site's TrailGate support and return its validated capabilities and advertised actions. Fails when the site does not implement the protocol.",
       inputSchema: {
         type: 'object',
         properties: { url: URL_ARG },
@@ -160,6 +160,40 @@ export function createTrailGateTools(
             permissions: ctx.document.permissions,
             constraintTypes: ctx.document.constraint_types,
             capabilities: ctx.document.capabilities ?? {},
+            actions: ctx.document.actions ?? [],
+          });
+        } catch (err) {
+          return fail(err);
+        }
+      },
+    },
+    {
+      name: 'trailgate.actions',
+      description:
+        "List the actions a site advertises, each annotated with local grant coverage. Use this to map a user intent to a concrete endpoint and the permission to request at consent time. Coverage is advisory: the site's pipeline decides authorization on every request. Uncovered entries report the permission to include in trailgate.request.",
+      inputSchema: {
+        type: 'object',
+        properties: { url: URL_ARG },
+        required: ['url'],
+        additionalProperties: false,
+      },
+      handler: async (args) => {
+        try {
+          const coverage = await client.listActions(requireString(args, 'url'));
+          return ok({
+            actions: coverage.map((entry) => ({
+              id: entry.action.id,
+              method: entry.action.method,
+              path: entry.action.path,
+              permission: entry.action.permission,
+              description: entry.action.description,
+              mutates: entry.action.mutates ?? true,
+              resource: entry.action.resource,
+              spend: entry.action.spend,
+              covered: entry.covered,
+              grant: entry.grant?.jti,
+              missing: entry.missing,
+            })),
           });
         } catch (err) {
           return fail(err);
@@ -375,7 +409,7 @@ export function createTrailGateTools(
     {
       name: 'trailgate.revoke',
       description:
-        'Revoke a grant at the issuing site (provisional endpoint in draft 0.1). Removes the local record on success.',
+        'Revoke a grant at the issuing site via the ratified self-revocation endpoint. Removes the local record on success.',
       inputSchema: {
         type: 'object',
         properties: {

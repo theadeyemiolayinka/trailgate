@@ -27,8 +27,33 @@ function fakeClient(): FakeClient & Parameters<typeof createTrailGateTools>[0] {
           permissions: ['tg.order.create'],
           constraint_types: ['max_amount'],
           capabilities: { supports_redirect: false },
+          actions: [
+            {
+              id: 'orders.create',
+              method: 'POST',
+              path: '/api/orders',
+              permission: 'tg.order.create',
+              spend: true,
+            },
+          ],
         },
       };
+    },
+    listActions: async () => {
+      calls.push('listActions');
+      return [
+        {
+          action: {
+            id: 'orders.create',
+            method: 'POST',
+            path: '/api/orders',
+            permission: 'tg.order.create',
+            spend: true,
+          },
+          covered: false,
+          missing: ['tg.order.create'],
+        },
+      ];
     },
     requestGrant: async () => {
       calls.push('requestGrant');
@@ -89,6 +114,7 @@ describe('createTrailGateTools', () => {
   it('exposes the documented tool names', () => {
     assert.deepEqual(tools.map((t) => t.name).sort(), [
       'trailgate.access',
+      'trailgate.actions',
       'trailgate.discover',
       'trailgate.fetch',
       'trailgate.grants',
@@ -97,6 +123,20 @@ describe('createTrailGateTools', () => {
       'trailgate.revoke',
       'trailgate.status',
     ]);
+  });
+
+  it('actions returns the catalog with coverage and no secrets', async () => {
+    const result = await tool(tools, 'trailgate.actions').handler({
+      url: 'https://shop.example.com',
+    });
+    assert.equal(result.isError, undefined);
+    const parsed = JSON.parse(serialized(result)) as {
+      actions: { id: string; covered: boolean; missing?: string[] }[];
+    };
+    assert.equal(parsed.actions[0]?.id, 'orders.create');
+    assert.equal(parsed.actions[0]?.covered, false);
+    assert.deepEqual(parsed.actions[0]?.missing, ['tg.order.create']);
+    assert.ok(!serialized(result).includes('SECRET-GRANT-TOKEN'));
   });
 
   it('discover returns capabilities only', async () => {

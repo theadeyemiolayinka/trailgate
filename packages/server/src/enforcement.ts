@@ -1,4 +1,5 @@
 import type {
+  DiscoveryAction,
   GrantPayload,
   Jwk,
   KeyResolver,
@@ -29,12 +30,7 @@ import type {
   RouteProtection,
 } from './types.ts';
 
-/**
- * Response header carrying the receipt JWS.
- * @provisional The receipt delivery channel is not named in draft 0.1
- * (spec section 14 requires a receipt but does not specify how it is
- * returned). Raise changes through D0 before depending on this name.
- */
+/** Response header carrying the receipt JWS (spec section 14.1). */
 export const RECEIPT_HEADER = 'trailgate-receipt';
 
 /** Maps verification failure codes to the spec section 11.3 stage for audit. */
@@ -217,6 +213,57 @@ function siteKeyResolver(config: ResolvedServerConfig): KeyResolver {
 }
 
 /**
+ * Registers the route's action advertisement (spec section 5.2) in the
+ * catalog published by discovery. `permission` and `mutates` are derived
+ * from the same `RouteProtection` that enforcement uses, so the catalog
+ * cannot drift from what the pipeline actually requires. Throws for
+ * malformed or conflicting declarations; protect() is host startup code,
+ * so failing fast is correct.
+ */
+function registerAction(route: RouteProtection, config: ResolvedServerConfig): void {
+  const advertised = route.action;
+  if (advertised === undefined) {
+    return;
+  }
+  if (advertised.id === '' || !/^[A-Z]+$/.test(advertised.method)) {
+    throw new TrailGateError(
+      Codes.INTERNAL_ERROR,
+      `action '${advertised.id}' must declare a non-empty id and an uppercase method`,
+    );
+  }
+  if (!advertised.path.startsWith('/') || advertised.path.includes('://')) {
+    throw new TrailGateError(
+      Codes.INTERNAL_ERROR,
+      `action '${advertised.id}' path must be a path template on the issuer origin`,
+    );
+  }
+  if (!config.permissions.includes(route.permission)) {
+    throw new TrailGateError(
+      Codes.INTERNAL_ERROR,
+      `action '${advertised.id}' permission '${route.permission}' is not in the site vocabulary`,
+    );
+  }
+  const action: DiscoveryAction = {
+    id: advertised.id,
+    method: advertised.method,
+    path: advertised.path,
+    permission: route.permission,
+    ...(advertised.description !== undefined ? { description: advertised.description } : {}),
+    mutates: route.mutating ?? true,
+    ...(advertised.resource !== undefined ? { resource: advertised.resource } : {}),
+    ...(advertised.spend !== undefined ? { spend: advertised.spend } : {}),
+  };
+  const existing = config.actions.get(action.id);
+  if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(action)) {
+    throw new TrailGateError(
+      Codes.INTERNAL_ERROR,
+      `action id '${action.id}' is registered twice with different declarations`,
+    );
+  }
+  config.actions.set(action.id, action);
+}
+
+/**
  * Wraps a host handler with the spec section 11 enforcement pipeline:
  * protocol verification via `verifyProtectedRequest`, then reservation,
  * execution, settlement, idempotency recording, audit, and a signed receipt.
@@ -231,6 +278,7 @@ export function createProtectedHandler(
   handler: ProtectedHandler,
   config: ResolvedServerConfig,
 ): (req: HostRequest) => Promise<HostResponse> {
+  registerAction(route, config);
   return async (req) => {
     try {
       assertRequestLimits(req, config);

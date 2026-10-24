@@ -41,6 +41,30 @@ export interface DiscoveryCapabilities {
   [member: string]: unknown;
 }
 
+/**
+ * Advisory descriptor of one protected route (spec section 5.2). It maps
+ * intent to a concrete request target; it authorizes nothing by itself and
+ * is untrusted site input until the discovery document validates.
+ */
+export interface DiscoveryAction {
+  /** Stable action identifier, unique within the document. */
+  id: string;
+  /** Uppercase HTTP method of the protected route. */
+  method: string;
+  /** Absolute path template; `{name}` marks a substituted path parameter. */
+  path: string;
+  /** The `tg.*` permission the request must hold. */
+  permission: string;
+  /** Short statement of what the action does. */
+  description?: string;
+  /** Whether the action changes state; absent means "treat as mutating". */
+  mutates?: boolean;
+  /** Resource selector template, e.g. `cart:{user}`. */
+  resource?: string;
+  /** When true, the action may charge money and spend constraints apply. */
+  spend?: boolean;
+}
+
 export interface DiscoveryDocument {
   version: string;
   protocol_versions: string[];
@@ -50,6 +74,7 @@ export interface DiscoveryDocument {
   permissions: string[];
   constraint_types: string[];
   capabilities?: DiscoveryCapabilities;
+  actions?: DiscoveryAction[];
   critical?: string[];
   [member: string]: unknown;
 }

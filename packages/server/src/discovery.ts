@@ -26,6 +26,9 @@ export function buildDiscoveryDocument(config: ResolvedServerConfig): DiscoveryD
     ...(Object.keys(config.capabilities).length > 0
       ? { capabilities: { ...config.capabilities } }
       : {}),
+    ...(config.actions.size > 0
+      ? { actions: [...config.actions.values()].sort((a, b) => a.id.localeCompare(b.id)) }
+      : {}),
     ...config.discoveryExtensions,
   };
   return validateDiscoveryDocument(doc, {

@@ -315,13 +315,13 @@ textarea:focus-visible {
   color: var(--ink-faint);
   margin: 0 0 var(--space-2);
 }
-.product-card .price {
-  font-size: 0.95rem;
-}
-
 .price {
   font-family: var(--font-display);
   font-variant-numeric: tabular-nums;
+}
+
+.product-card .price {
+  font-size: 0.95rem;
 }
 
 .category-nav {

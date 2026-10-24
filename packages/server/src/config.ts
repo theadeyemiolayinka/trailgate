@@ -1,5 +1,6 @@
 import type {
   Clock,
+  DiscoveryAction,
   DiscoveryCapabilities,
   NonceStore,
   ResourceOwnerResolver,
@@ -154,6 +155,11 @@ export interface ResolvedServerConfig {
   };
   capabilities: DiscoveryCapabilities;
   discoveryExtensions: Record<string, unknown>;
+  /**
+   * Action catalog assembled from `RouteProtection.action` declarations as
+   * routes are wrapped with `protect()`; published in discovery `actions`.
+   */
+  actions: Map<string, DiscoveryAction>;
   stores: ServerStores;
   subjectFor: (siteUserId: string) => string;
   policy?: SitePolicy;
@@ -261,6 +267,7 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     paths,
     capabilities,
     discoveryExtensions: options.discoveryExtensions ?? {},
+    actions: new Map(),
     stores,
     subjectFor: options.subjectFor ?? ((siteUserId) => siteUserId),
     clock,
