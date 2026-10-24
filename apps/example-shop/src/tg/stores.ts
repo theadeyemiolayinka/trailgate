@@ -259,6 +259,12 @@ export function createGrantRegistry(db: Db): GrantRegistry {
         | undefined;
       return row === undefined ? undefined : toGrantRecord(row);
     },
+    listBySubject: async (subject) => {
+      const rows = db
+        .prepare('SELECT * FROM tg_grants WHERE subject = ? ORDER BY issued_at DESC')
+        .all(subject) as unknown as GrantRow[];
+      return rows.map(toGrantRecord);
+    },
     isRevoked: async (jti) => {
       const row = db.prepare('SELECT status FROM tg_grants WHERE jti = ?').get(jti) as
         | { status: string }
