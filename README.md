@@ -60,6 +60,9 @@ pnpm verify
 - `docs/architecture.md`: components and trust boundaries.
 - `docs/threat-model.md`: assets, attackers, surfaces, mitigations, open risks.
 - `docs/guides/quickstart.md`: verified external setup path.
+- `docs/CONNECT_YOUR_AGENT.md`: connect an agent (Devin, Claude, Cursor, Windsurf, Codex) via MCP or the CLI.
+- `docs/INSTALL_AND_DEPLOY.md`: bundle builds, MCP configs, two-laptop setup.
+- `docs/RELEASING.md`: changesets versioning and the manual GitHub Release pipeline.
 - `docs/limitations.md`: known limitations, honestly stated.
 - `docs/security-review-0.1.md`: adversarial audit of draft 0.1 core.
 - `docs/release-review-0.1.md`: requirement-to-test matrix, conformance findings, and the release decision.
