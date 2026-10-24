@@ -172,6 +172,13 @@ A constraint is `{ "type": "<name>", "params": { ... } }`. The `type` registry i
 | `valid_window` | `{ "not_before": int, "not_after": int }` | Requests outside `[not_before, not_after]` unix seconds are denied. Narrower than `exp`; both apply. |
 | `spend_window` | `{ "amount": int, "currency": "XXX", "window_seconds": int }` | The sum of consumed ledger entries in the last `window_seconds` (rolling) plus live reservations and this request MUST NOT exceed `amount` minor units. Enforced inside the atomic reservation check per section 12. |
 
+Only the types in this table are registered for 0.1. Everything else is unsupported and fails closed, never silently ignored:
+
+- A grant request proposing an unregistered type MUST be rejected at intake with `tg.grant.scope_rejected`.
+- If an unregistered type ever reaches an issued grant, evaluators MUST deny every request under it with `tg.constraint.unknown_type`.
+
+Examples of policy shapes deliberately not in 0.1: threshold-triggered re-approval (for example "spend above X needs a fresh human decision"), disjunctive constraints ("either budget A or budget B"), wildcard or prefix resource scope, percentage-of-balance limits, and per-product or per-category conditions. Sites needing such policies either implement them as application-level authorization (section 11.3 stage 13) behind `tg.*` permissions they advertise, or wait for a later registry version. A site MUST NOT express them as unregistered constraint types and hope evaluators guess.
+
 ### 9.3 Combination and inheritance
 
 - Constraints listed in `tg.constraints` apply to every request under the grant.

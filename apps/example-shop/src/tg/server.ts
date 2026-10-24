@@ -5,7 +5,6 @@ import { createTrailGateServer, generateSigningKeyPair } from '@trailgate/server
 import type { ShopConfig } from '../config.ts';
 import type { Db } from '../db/database.ts';
 import type { ShopPolicy } from '../policy.ts';
-import { SHOP_POLICY } from '../policy.ts';
 import type { SqliteAuditSink } from './stores.ts';
 import {
   createAgentKeyDirectory,

@@ -312,11 +312,6 @@ test('agent flow: consent, scoped spend, budget denial, revocation', async (t) =
   // Denied charge: wallet untouched, ledger consumed unchanged.
   assert.equal(getWallet(db, 'usr_demo').balance.amount, 25_000 - 4800);
 
-  // Idempotent replay returns the stored outcome.
-  // (The SDK uses a fresh nonce but the same operation digest.)
-  const replayKey = { 'idempotency-key': 'idem-test-1' };
-  void replayKey;
-
   // Cross-user resource: the grant scopes usr_demo's wallet only.
   const other = await client.fetchProtected(site, {
     method: 'GET',

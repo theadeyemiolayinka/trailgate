@@ -45,12 +45,18 @@ async function freePort(): Promise<number> {
   return port;
 }
 
-async function waitForServer(base: string, proc: ChildProcess): Promise<void> {
+async function waitForServer(
+  base: string,
+  proc: ChildProcess,
+  getOutput: () => string,
+): Promise<void> {
   const deadline = Date.now() + 15_000;
   let lastError = 'not started';
   while (Date.now() < deadline) {
     if (proc.exitCode !== null) {
-      throw new Error(`server exited early with code ${proc.exitCode}: ${lastError}`);
+      throw new Error(
+        `server exited early with code ${proc.exitCode}: ${lastError}\n${getOutput()}`,
+      );
     }
     try {
       const res = await fetch(`${base}/`, { signal: AbortSignal.timeout(1000) });
@@ -63,7 +69,7 @@ async function waitForServer(base: string, proc: ChildProcess): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`server did not become ready: ${lastError}`);
+  throw new Error(`server did not become ready: ${lastError}\n${getOutput()}`);
 }
 
 /** Logs in over real HTTP and approves the consent request via the real form. */
@@ -123,7 +129,7 @@ test('milestone A: live end-to-end flow over real http, real db, real sdks', asy
     serverOutput += chunk;
   });
   try {
-    await waitForServer(base, proc);
+    await waitForServer(base, proc, () => serverOutput);
     const transport = loopbackTransport(ISSUER, base);
     const client = createAgentClient({ transport });
     const key = SoftwareKeyProvider.generate();

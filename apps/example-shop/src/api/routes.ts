@@ -1,4 +1,3 @@
-import type { GrantPayload } from '@trailgate/core';
 import { Codes, decodeCompactJws, TrailGateError } from '@trailgate/core';
 import type {
   EnforcementContext,

@@ -74,6 +74,11 @@ Given correctly implemented ports, `verifyProtectedRequest` enforces, in spec or
   exact signature base sent.
 - Key custody: `AgentSigner` has no export method; private key material never
   enters model-visible surfaces.
+- Decision reporting: the client surfaces the server's typed error `code` and never
+  computes or second-guesses a decision locally. Spend fields such as
+  `consumed_under_grant` are informational point-in-time values from the server;
+  they are not guarantees, and the only authoritative outcome is the response to
+  the request itself.
 
 ## Guaranteed only if the port is correct
 

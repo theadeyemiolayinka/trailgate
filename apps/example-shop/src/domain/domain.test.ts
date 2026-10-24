@@ -102,7 +102,6 @@ test('wallet: topup, debit, insufficient funds, refund', () => {
   assert.equal(getWallet(db, 'usr_demo').balance.amount, before + 500);
 
   // debitForOrder is exercised through payOrder in the orders suite; test guard here
-  const tooMuch = money(before + 500 + 1);
   assert.throws(
     () => refundForOrder(db, 'usr_demo', { amount: 0, currency: 'USD' }, 'ord_x'),
     /positive/,
@@ -122,14 +121,14 @@ test('orders: create snapshots cart, pay debits wallet, refund restores', () => 
   const db = testDb();
   const startBalance = getWallet(db, 'usr_demo').balance.amount;
   const mug = getProduct(db, 'drk-mug-01');
-  const startStock = mug!.stock;
+  const startStock = mug?.stock;
 
   setCartQty(db, 'usr_demo', 'drk-mug-01', 2);
   const order = createOrderFromCart(db, 'usr_demo', { placedVia: 'user' });
   assert.equal(order.status, 'awaiting_payment');
   assert.equal(order.total.amount, 4800);
   assert.equal(getCart(db, 'usr_demo').lines.length, 0);
-  assert.equal(getProduct(db, 'drk-mug-01')!.stock, startStock - 2);
+  assert.equal(getProduct(db, 'drk-mug-01')?.stock, startStock - 2);
 
   assert.throws(() => payOrder(db, 'ord_missing', 'usr_demo'), OrderError);
   const paid = payOrder(db, order.id, 'usr_demo');
@@ -140,7 +139,7 @@ test('orders: create snapshots cart, pay debits wallet, refund restores', () => 
   const { refund } = refundOrder(db, order.id, 'usr_demo');
   assert.equal(refund.amount, 4800);
   assert.equal(getWallet(db, 'usr_demo').balance.amount, startBalance);
-  assert.equal(getProduct(db, 'drk-mug-01')!.stock, startStock);
+  assert.equal(getProduct(db, 'drk-mug-01')?.stock, startStock);
 });
 
 test('orders: cross-user isolation and cancel', () => {
@@ -160,7 +159,7 @@ test('orders: insufficient wallet balance keeps order unpaid', () => {
   setCartQty(db, poor.id, 'hm-throw-01', 1); // 8900 > 0 balance
   const order = createOrderFromCart(db, poor.id, { placedVia: 'user' });
   assert.throws(() => payOrder(db, order.id, poor.id), InsufficientFundsError);
-  assert.equal(getOrder(db, order.id, poor.id)!.status, 'awaiting_payment');
+  assert.equal(getOrder(db, order.id, poor.id)?.status, 'awaiting_payment');
 });
 
 test('invoice returns order with bill-to', () => {
