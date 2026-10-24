@@ -8,6 +8,7 @@ export function renderCatalog(
   products: Product[],
   categories: string[],
   activeCategory: string | undefined,
+  query?: string,
 ): string {
   const nav = ['', ...categories]
     .map((category) => {
@@ -18,9 +19,23 @@ export function renderCatalog(
       return `<a href="${href}"${current ? ' aria-current="true"' : ''}>${esc(label)}</a>`;
     })
     .join('');
+  const searchForm = `<form method="get" action="/products" class="search-form" role="search">
+    ${
+      activeCategory !== undefined
+        ? `<input type="hidden" name="category" value="${esc(activeCategory)}">`
+        : ''
+    }
+    <input type="search" name="q" value="${esc(query ?? '')}" placeholder="Search the catalog" aria-label="Search products">
+    <button class="button" type="submit">Search</button>
+  </form>`;
   const grid =
     products.length === 0
-      ? emptyState('Nothing here', 'No products in this category yet.')
+      ? emptyState(
+          'Nothing here',
+          query !== undefined && query !== ''
+            ? `No products match "${esc(query)}".`
+            : 'No products in this category yet.',
+        )
       : `<ul class="product-grid">${products
           .map(
             (p) => `<li>
@@ -43,5 +58,7 @@ export function renderCatalog(
   </div>
 </div>
 <nav class="category-nav" aria-label="Categories">${nav}</nav>
+${searchForm}
+${query !== undefined && query !== '' ? `<p class="muted">${products.length} result${products.length === 1 ? '' : 's'} for "${esc(query)}"</p>` : ''}
 ${grid}`;
 }

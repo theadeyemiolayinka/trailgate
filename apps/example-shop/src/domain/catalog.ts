@@ -48,6 +48,22 @@ export function getProduct(db: Db, sku: string): Product | undefined {
   return row === undefined ? undefined : toProduct(row);
 }
 
+/** Substring match over name, category, and description. `q` is trimmed; empty means no filter. */
+export function searchProducts(db: Db, q: string): Product[] {
+  const needle = q.trim().toLowerCase();
+  if (needle === '') {
+    return listProducts(db);
+  }
+  const rows = db
+    .prepare(
+      `SELECT * FROM products
+       WHERE lower(name) LIKE ? OR lower(category) LIKE ? OR lower(description) LIKE ?
+       ORDER BY category, name`,
+    )
+    .all(`%${needle}%`, `%${needle}%`, `%${needle}%`) as unknown as ProductRow[];
+  return rows.map(toProduct);
+}
+
 export function listCategories(db: Db): string[] {
   return (
     db.prepare('SELECT DISTINCT category FROM products ORDER BY category').all() as {

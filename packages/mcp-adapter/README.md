@@ -4,11 +4,12 @@ Optional MCP integration for agent runtimes, built on `@trailgate/agent`.
 
 Owner: D2 (see `internal/TEAM.md`).
 
-Status: Phase 4 boundary draft. The tool surface is defined and tested here; wiring to `@modelcontextprotocol/sdk` lands in Phase 4 per `internal/PHASES.md`.
-
 ## What this package is
 
-`createTrailGateTools(client)` returns plain tool descriptors (`name`, `description`, `inputSchema`, `handler`) that a thin adapter maps onto an MCP server's `tool()` registration. Keeping the boundary MCP-SDK-free means the protocol and the ordinary SDK carry no dependency on a particular agent runtime.
+Two layers:
+
+1. `createTrailGateTools(client)` returns plain tool descriptors (`name`, `description`, `inputSchema`, `handler`) - transport-neutral, MCP-SDK-free.
+2. `serveMcpStdio(tools, opts)` / the `trailgate-mcp` bin host those tools as a real MCP server: newline-delimited JSON-RPC 2.0 on stdio implementing `initialize`, `tools/list`, `tools/call`, `ping`. No external MCP SDK dependency; the adapter speaks the protocol subset tool hosts need.
 
 Tools: `trailgate.discover` (validated capability document), `trailgate.actions` (action catalog annotated with stored-grant coverage), `trailgate.request` (grant request, returns `consent_url`), `trailgate.status` (grant request status), `trailgate.access` (local access check against stored grants), `trailgate.fetch` (signed request to a discovered site), `trailgate.grants` (stored grant metadata), `trailgate.redeem` (redeem an approved request), `trailgate.revoke` (revoke a grant).
 
@@ -19,7 +20,42 @@ Tools: `trailgate.discover` (validated capability document), `trailgate.actions`
 - Failures are typed results (`{ error: { code, message } }`, `isError: true`), not thrown exceptions.
 - `options.beforeAction` gates `request`, `fetch`, `redeem`, and `revoke` so the runtime can enforce user consent or local policy before the adapter acts.
 
-## Using with an MCP runtime
+## Running the server
+
+```sh
+pnpm build                      # once, from the repo root
+node packages/mcp-adapter/dist/mcp.js
+```
+
+Environment:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TRAILGATE_STATE_DIR` | `.trailgate` (cwd) | keys, grants, pending sessions, discovery cache - same layout as the `trailgate` CLI, so both share state |
+| `NODE_EXTRA_CA_CERTS` | unset | trust a dev CA such as `apps/example-shop/dev-certs/ca.crt` |
+
+On first run the server generates an ed25519 agent key into the state dir
+(dev-grade custody, mode 0600). stdout carries JSON-RPC only; logs go to
+stderr.
+
+MCP host configuration (example shape; consult your host's docs):
+
+```json
+{
+  "mcpServers": {
+    "trailgate": {
+      "command": "node",
+      "args": ["<repo>/packages/mcp-adapter/dist/mcp.js"],
+      "env": {
+        "TRAILGATE_STATE_DIR": "<repo>/.trailgate",
+        "NODE_EXTRA_CA_CERTS": "<repo>/apps/example-shop/dev-certs/ca.crt"
+      }
+    }
+  }
+}
+```
+
+## Using with a custom MCP runtime
 
 ```ts
 import { createAgentClient, SoftwareKeyProvider } from '@trailgate/agent';

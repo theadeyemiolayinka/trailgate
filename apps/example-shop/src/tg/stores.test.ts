@@ -239,7 +239,7 @@ test('spending ledger: expired reservations stop counting against headroom', asy
 });
 
 test('spending ledger: spend_window headroom and consumedInWindow', async () => {
-  let at = NOW;
+  const at = NOW;
   const db = testDb();
   const ledger = createSpendingLedger(db, () => at);
   const usd = (amount: number) => ({ amount, currency: 'USD' });

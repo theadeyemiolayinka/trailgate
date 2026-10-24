@@ -4,7 +4,7 @@ import { createAgentApi } from './api/routes.ts';
 import type { ShopConfig } from './config.ts';
 import type { Db } from './db/database.ts';
 import { CartError, getCart, setCartQty } from './domain/cart.ts';
-import { getProduct, listCategories, listProducts } from './domain/catalog.ts';
+import { getProduct, listCategories, listProducts, searchProducts } from './domain/catalog.ts';
 import {
   cancelOrder,
   createOrderFromCart,
@@ -312,15 +312,17 @@ function buildRoutes(ctx: Ctx): Router {
 
   router.get('/products', (req) => {
     const category = req.query.get('category') ?? undefined;
+    const q = req.query.get('q') ?? undefined;
+    const products =
+      q !== undefined && q.trim() !== ''
+        ? searchProducts(db, q)
+        : category !== undefined
+          ? listProducts(db, category)
+          : listProducts(db);
     return render(ctx, req, {
       title: 'Catalog',
       section: 'products',
-      body: renderCatalog(
-        {},
-        category !== undefined ? listProducts(db, category) : listProducts(db),
-        listCategories(db),
-        category,
-      ),
+      body: renderCatalog({}, products, listCategories(db), category, q),
     });
   });
 

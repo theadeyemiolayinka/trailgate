@@ -17,7 +17,11 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "check": "biome check .",
-    "verify": "pnpm check && pnpm build && pnpm typecheck && pnpm test"
+    "verify": "pnpm check && pnpm build && pnpm typecheck && pnpm test",
+    "cli": "node packages/agent-cli/dist/cli.js",
+    "mcp": "node packages/mcp-adapter/dist/mcp.js",
+    "shop": "pnpm --dir apps/example-shop dev",
+    "shop:certs": "pnpm --dir apps/example-shop certs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
