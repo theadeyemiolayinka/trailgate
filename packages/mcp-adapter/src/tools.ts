@@ -297,8 +297,7 @@ export function createTrailGateTools(
           constraints: { type: 'array', items: { type: 'object' } },
           requested_seconds: {
             type: 'integer',
-            description:
-              'How long the access should last, in seconds. The site may shorten it.',
+            description: 'How long the access should last, in seconds. The site may shorten it.',
           },
           user_authorized: {
             type: 'boolean',

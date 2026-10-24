@@ -272,6 +272,68 @@ describe('consent decisions', () => {
     );
   });
 
+  it('lets the consenting user extend the grant lifetime up to the consent cap', async () => {
+    const server = makeServer({ maxGrantSeconds: 86_400, maxConsentLifetimeSeconds: 2_592_000 });
+    const res = await server.handleGrantRequest(
+      post(`${ISSUER}/tg/grant-request`, grantRequestBody()),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    const view = await server.getConsent(requestId);
+    assert.equal(view?.lifetimeCapSeconds, 2_592_000);
+    await server.decideConsent(requestId, 'approve', 'user_1', { lifetimeSeconds: 2_592_000 });
+    const after = await server.getConsent(requestId);
+    assert.equal(after?.effective.lifetimeSeconds, 2_592_000);
+  });
+
+  it('clamps a consent-chosen lifetime to the consent cap, which defaults to maxGrantSeconds', async () => {
+    const server = makeServer({ maxGrantSeconds: 86_400 });
+    const res = await server.handleGrantRequest(
+      post(`${ISSUER}/tg/grant-request`, grantRequestBody()),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    await server.decideConsent(requestId, 'approve', 'user_1', {
+      lifetimeSeconds: 9_999_999,
+    });
+    const view = await server.getConsent(requestId);
+    assert.equal(view?.effective.lifetimeSeconds, 86_400);
+  });
+
+  it('issues a grant whose exp reflects the consent-chosen lifetime', async () => {
+    const server = makeServer({ maxConsentLifetimeSeconds: 2_592_000 });
+    const { verifier, challenge } = pkce();
+    const res = await server.handleGrantRequest(
+      post(`${ISSUER}/tg/grant-request`, grantRequestBody({ code_challenge: challenge })),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    await server.decideConsent(requestId, 'approve', 'user_1', { lifetimeSeconds: 604_800 });
+    const redeemed = await server.handleRedemption(
+      post(`${ISSUER}/tg/grant-redemption`, { request_id: requestId, code_verifier: verifier }),
+    );
+    assert.equal(redeemed.status, 200);
+    const token = (redeemed.body as { grant: string }).grant;
+    const payload = await verifyGrant(token, {
+      resolveSiteKey: { resolve: async () => site.publicJwk },
+      issuer: ISSUER,
+      audience: ISSUER,
+      now: NOW,
+    });
+    assert.equal(payload.exp, NOW + 604_800);
+  });
+
+  it('rejects a non-positive or non-integer consent lifetime', async () => {
+    const server = makeServer();
+    for (const bad of [0, -5, 1.5]) {
+      const res = await server.handleGrantRequest(
+        post(`${ISSUER}/tg/grant-request`, grantRequestBody()),
+      );
+      const requestId = (res.body as { request_id: string }).request_id;
+      await assertCode(
+        server.decideConsent(requestId, 'approve', 'user_1', { lifetimeSeconds: bad }),
+        Codes.REQUEST_MALFORMED,
+      );
+    }
+  });
+
   it('rate limits an agent key that floods grant requests', async () => {
     const server = makeServer({ maxPendingRequestsPerAgent: 2, maxGrantRequestsPerMinute: 10 });
     await server.handleGrantRequest(post(`${ISSUER}/tg/grant-request`, grantRequestBody()));

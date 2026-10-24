@@ -235,6 +235,7 @@ A site SHOULD rate-limit this endpoint per `agent_key` thumbprint: a bounded num
 
 - `consent_url` is on the site origin. The user authenticates through the site's existing flow. TrailGate defines no authentication method.
 - The consent page MUST render the requested permissions, resources, constraints, and lifetime verbatim from the stored grant request. The site MUST NOT alter the terms at render time, though it MAY tighten constraints (section 9.3) and MUST show the effective values.
+- At decision time the user MAY narrow permissions and resources (subset-only; broadening is rejected) and MAY choose the grant's lifetime. The consent-chosen lifetime is the one field that may exceed the requested value, because the consenting user is the authority on duration; a site caps it with its own consent-lifetime ceiling (independent of `max_grant_seconds`, which bounds only agent requests).
 - Approval records the decision against `request_id`. Denial records it too; both are terminal states for the request.
 - If `redirect_uri` was registered: on decision the site 302-redirects to exactly that URI with `request_id` and `state` as query parameters. Any other redirect behavior is a protocol violation.
 

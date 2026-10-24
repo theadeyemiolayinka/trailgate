@@ -147,6 +147,13 @@ export interface TrailGateServerOptions {
   defaultGrantSeconds?: number;
   /** Ceiling on grant lifetime, advertised as `capabilities.max_grant_seconds`. */
   maxGrantSeconds?: number;
+  /**
+   * Ceiling on the lifetime a user may pick at consent (a "remember me"
+   * choice can exceed `maxGrantSeconds`, which bounds only what an agent may
+   * request). Defaults to `maxGrantSeconds` when set, else
+   * `defaultGrantSeconds`.
+   */
+  maxConsentLifetimeSeconds?: number;
   /** Reservation TTL; recommended 300 (spec section 12). */
   reservationTtlSeconds?: number;
   /** Per-request approval record TTL; how long a pending or approved decision stays valid. */
@@ -210,6 +217,7 @@ export interface ResolvedServerConfig {
   grantRequestTtlSeconds: number;
   defaultGrantSeconds: number;
   maxGrantSeconds?: number;
+  maxConsentLifetimeSeconds: number;
   reservationTtlSeconds: number;
   requestApprovalTtlSeconds: number;
   maxBodyBytes: number;
@@ -317,6 +325,11 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
     toleranceSeconds: tolerance,
     grantRequestTtlSeconds: grantRequestTtl,
     defaultGrantSeconds: options.defaultGrantSeconds ?? DEFAULT_GRANT_LIFETIME_SECONDS,
+    maxConsentLifetimeSeconds:
+      options.maxConsentLifetimeSeconds ??
+      options.maxGrantSeconds ??
+      options.defaultGrantSeconds ??
+      DEFAULT_GRANT_LIFETIME_SECONDS,
     reservationTtlSeconds: options.reservationTtlSeconds ?? DEFAULT_RESERVATION_TTL_SECONDS,
     requestApprovalTtlSeconds:
       options.requestApprovalTtlSeconds ?? DEFAULT_REQUEST_APPROVAL_TTL_SECONDS,

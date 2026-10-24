@@ -1135,7 +1135,17 @@ function buildRoutes(ctx: Ctx): Router {
             'select at least one permission, or deny the request',
           );
         }
-        const narrow = decision === 'approve' ? { permissions: formValues.perm ?? [] } : undefined;
+        const lifetimeSeconds =
+          form.lifetime_seconds !== undefined
+            ? Number.parseInt(form.lifetime_seconds, 10)
+            : undefined;
+        const narrow =
+          decision === 'approve'
+            ? {
+                permissions: formValues.perm ?? [],
+                ...(lifetimeSeconds !== undefined ? { lifetimeSeconds } : {}),
+              }
+            : undefined;
         const outcome = await ctx.tg.tg.decideConsent(requestId, decision, user.id, narrow);
         if (outcome.redirectTo !== undefined) {
           return { status: 302, headers: { location: outcome.redirectTo } };

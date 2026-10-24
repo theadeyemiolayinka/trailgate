@@ -109,6 +109,21 @@ export function renderConsent(
     JSON.stringify(effective.constraints) !== JSON.stringify(requested.constraints);
 
   const decided = view.status !== 'pending';
+
+  const durationLadder = [3600, 86_400, 604_800, 2_592_000].filter(
+    (s) => s <= view.lifetimeCapSeconds,
+  );
+  if (!durationLadder.includes(effective.lifetimeSeconds)) {
+    durationLadder.push(effective.lifetimeSeconds);
+    durationLadder.sort((a, b) => a - b);
+  }
+  const durationOptions = durationLadder
+    .map(
+      (s) =>
+        `<option value="${s}"${s === effective.lifetimeSeconds ? ' selected' : ''}>${esc(formatDuration(s))}</option>`,
+    )
+    .join('');
+
   const denyCopy = `<div class="consent-term">
       <h3>If you deny</h3>
       <p>Denying records the decision, closes this request, and issues nothing. The agent is informed the request was denied and cannot redeem it. Your cart, orders, and wallet are untouched.</p>
@@ -139,6 +154,10 @@ export function renderConsent(
             )
             .join('')}
         </fieldset>
+        <label class="scope-choice" style="display:block;margin:var(--space-3) 0">
+          Keep this access for
+          <select name="lifetime_seconds">${durationOptions}</select>
+        </label>
         <div class="consent-actions">
           <button class="button" type="submit" name="decision" value="approve">Approve selected</button>
           <button class="button button-secondary" type="submit" name="decision" value="deny">Deny all</button>

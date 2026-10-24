@@ -95,6 +95,7 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
     permissions: [...PERMISSIONS],
     maxGrantSeconds: 86_400,
     defaultGrantSeconds: 86_400,
+    maxConsentLifetimeSeconds: 2_592_000,
     stores: {
       grantRequests: createGrantRequestStore(db),
       agentKeys: createAgentKeyDirectory(db),

@@ -281,6 +281,7 @@ export async function getConsentView(
       constraints: record.effectiveConstraints ?? record.body.constraints,
       lifetimeSeconds: record.effectiveLifetimeSeconds ?? config.defaultGrantSeconds,
     },
+    lifetimeCapSeconds: config.maxConsentLifetimeSeconds,
     ...(record.body.redirect_uri !== undefined ? { redirectUri: record.body.redirect_uri } : {}),
   };
 }
@@ -294,10 +295,14 @@ export async function getConsentView(
  * `narrow` lets the consent surface reduce scope at decision time (for
  * example the user unchecking permissions): every entry must already be in
  * the effective requested set, so consent can only ever narrow, never widen.
+ * `lifetimeSeconds` is the exception: the consenting human is the authority
+ * on how long the access lasts, so they may pick any duration up to
+ * `config.maxConsentLifetimeSeconds`, shorter or longer than requested.
  */
 export interface ConsentNarrow {
   permissions?: string[];
   resources?: string[];
+  lifetimeSeconds?: number;
 }
 
 export async function decideConsent(
@@ -332,6 +337,16 @@ export async function decideConsent(
   const baseResources = record.effectiveResources ?? record.body.resources;
   const narrowedPermissions = assertSubset(narrow?.permissions, basePermissions, 'permissions');
   const narrowedResources = assertSubset(narrow?.resources, baseResources, 'resources');
+  let consentLifetime: number | undefined;
+  if (narrow?.lifetimeSeconds !== undefined) {
+    if (!Number.isInteger(narrow.lifetimeSeconds) || narrow.lifetimeSeconds < 1) {
+      throw new TrailGateError(
+        Codes.REQUEST_MALFORMED,
+        'consent lifetimeSeconds must be a positive integer',
+      );
+    }
+    consentLifetime = Math.min(narrow.lifetimeSeconds, config.maxConsentLifetimeSeconds);
+  }
   let boundResources: string[] | undefined;
   if (subject !== undefined && config.bindSubjectResources !== undefined) {
     const requested = narrowedResources ?? baseResources;
@@ -346,6 +361,7 @@ export async function decideConsent(
     ...(subject !== undefined ? { subject } : {}),
     ...(narrowedPermissions !== undefined ? { effectivePermissions: narrowedPermissions } : {}),
     ...(effectiveResources !== undefined ? { effectiveResources } : {}),
+    ...(consentLifetime !== undefined ? { effectiveLifetimeSeconds: consentLifetime } : {}),
   });
   if (decided === undefined) {
     throw new TrailGateError(Codes.REQUEST_MALFORMED, 'grant request already decided');

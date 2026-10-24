@@ -58,6 +58,12 @@ export interface ConsentView {
   status: 'pending' | 'approved' | 'denied' | 'expired' | 'issued';
   requested: RequestedScope;
   effective: EffectiveScope;
+  /**
+   * The longest lifetime the consenting user may choose for this grant
+   * (`maxConsentLifetimeSeconds`). The consent surface renders duration
+   * choices up to this cap.
+   */
+  lifetimeCapSeconds: number;
   redirectUri?: string;
 }
 
