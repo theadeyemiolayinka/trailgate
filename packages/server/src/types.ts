@@ -94,6 +94,7 @@ export interface GrantStatusResponse {
    */
   permissions?: string[];
   resources?: string[];
+  constraints?: Constraint[];
 }
 
 /**

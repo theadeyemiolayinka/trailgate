@@ -1,4 +1,4 @@
-import type { AuditEvent, Jwk, NonceStore } from '@trailgate/core';
+import type { AuditEvent, Constraint, Jwk, NonceStore } from '@trailgate/core';
 import { Codes, TrailGateError } from '@trailgate/core';
 import type {
   AgentKeyDirectory,
@@ -44,8 +44,8 @@ interface GrantRequestRow {
   effective_lifetime_seconds: number | null;
 }
 
-function parseJsonColumn<T>(value: string | null): T | undefined {
-  return value === null ? undefined : (JSON.parse(value) as T);
+function parseJsonColumn<T>(value: string | null | undefined): T | undefined {
+  return value == null ? undefined : (JSON.parse(value) as T);
 }
 
 function toGrantRequestRecord(row: GrantRequestRow): GrantRequestRecord {
@@ -62,7 +62,7 @@ function toGrantRequestRecord(row: GrantRequestRow): GrantRequestRecord {
   const effectiveConstraints = parseJsonColumn<GrantRequestRecord['effectiveConstraints']>(
     row.effective_constraints,
   );
-  if (row.subject !== null) record.subject = row.subject;
+  if (row.subject != null) record.subject = row.subject;
   if (row.decided_at !== null) record.decidedAt = row.decided_at;
   if (row.grant_id !== null) record.grantId = row.grant_id;
   if (effectivePermissions !== undefined) record.effectivePermissions = effectivePermissions;
@@ -195,6 +195,7 @@ interface GrantRow {
   permissions: string;
   effective_permissions: string | null;
   effective_resources: string | null;
+  effective_constraints: string | null;
   revoked_at: number | null;
   revocation_reason: string | null;
   revocation_actor: string | null;
@@ -210,12 +211,15 @@ function toGrantRecord(row: GrantRow): IssuedGrantRecord {
     status: row.status,
     permissions: JSON.parse(row.permissions) as string[],
   };
-  if (row.subject !== null) record.subject = row.subject;
+  if (row.subject != null) record.subject = row.subject;
   if (row.effective_permissions !== null) {
     record.effectivePermissions = JSON.parse(row.effective_permissions) as string[];
   }
-  if (row.effective_resources !== null) {
+  if (row.effective_resources != null) {
     record.effectiveResources = JSON.parse(row.effective_resources) as string[];
+  }
+  if (row.effective_constraints != null) {
+    record.effectiveConstraints = JSON.parse(row.effective_constraints) as Constraint[];
   }
   if (row.revoked_at !== null) record.revokedAt = row.revoked_at;
   if (row.revocation_reason !== null) record.revocationReason = row.revocation_reason;
@@ -280,24 +284,28 @@ export function createGrantRegistry(db: Db): GrantRegistry {
     currentScope: async (jti) => {
       const row = db
         .prepare(
-          'SELECT permissions, effective_permissions, effective_resources, status FROM tg_grants WHERE jti = ?',
+          'SELECT permissions, effective_permissions, effective_resources, effective_constraints, status FROM tg_grants WHERE jti = ?',
         )
         .get(jti) as
         | {
             permissions: string;
             effective_permissions: string | null;
             effective_resources: string | null;
+            effective_constraints: string | null;
             status: string;
           }
         | undefined;
       if (row === undefined || row.status === 'revoked') {
         return undefined;
       }
-      const scope: { permissions: string[]; resources?: string[] } = {
+      const scope: { permissions: string[]; resources?: string[]; constraints?: Constraint[] } = {
         permissions: JSON.parse(row.effective_permissions ?? row.permissions) as string[],
       };
-      if (row.effective_resources !== null) {
+      if (row.effective_resources != null) {
         scope.resources = JSON.parse(row.effective_resources) as string[];
+      }
+      if (row.effective_constraints != null) {
+        scope.constraints = JSON.parse(row.effective_constraints) as Constraint[];
       }
       return scope;
     },
@@ -305,12 +313,15 @@ export function createGrantRegistry(db: Db): GrantRegistry {
       const result = db
         .prepare(
           `UPDATE tg_grants
-           SET effective_permissions = ?, effective_resources = COALESCE(?, effective_resources)
+           SET effective_permissions = ?,
+               effective_resources = COALESCE(?, effective_resources),
+               effective_constraints = COALESCE(?, effective_constraints)
            WHERE jti = ? AND status = 'active'`,
         )
         .run(
           JSON.stringify(input.permissions),
           input.resources !== undefined ? JSON.stringify(input.resources) : null,
+          input.constraints !== undefined ? JSON.stringify(input.constraints) : null,
           jti,
         );
       if (result.changes === 0) {

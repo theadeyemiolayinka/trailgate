@@ -265,6 +265,31 @@ describe('verifyProtectedRequest', () => {
     assert.deepEqual(result.context.permissions, ['tg.order.create', 'tg.wallet.charge']);
   });
 
+  it('post-issuance scope replaces constraints without reissuing the grant', async () => {
+    // The signed grant allows up to 5000; the site later tightened the
+    // grant to 1000. The stored constraint set is what enforcement reads.
+    const { req } = await makeRequest();
+    const narrowed = deps({
+      grantScope: {
+        currentScope: async () => ({
+          constraints: [{ type: 'max_amount', params: { amount: 1000, currency: 'USD' } }],
+        }),
+      },
+    });
+    await expectCode(Codes.CONSTRAINT_VIOLATED, () =>
+      verifyProtectedRequest(req, {
+        ...narrowed,
+        requestAmount: { amount: 2000, currency: 'USD' },
+      }),
+    );
+    const { req: req2 } = await makeRequest();
+    const ok = await verifyProtectedRequest(req2, {
+      ...narrowed,
+      requestAmount: { amount: 500, currency: 'USD' },
+    });
+    assert.equal(ok.context.constraints[0]?.type, 'max_amount');
+  });
+
   it('denies resources outside the grant scope', async () => {
     const { req } = await makeRequest();
     await expectCode(Codes.REQUEST_RESOURCE_DENIED, () =>

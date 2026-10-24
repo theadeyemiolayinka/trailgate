@@ -1,4 +1,5 @@
-import type { AuditEvent, Constraint } from '@trailgate/core';
+import type { AuditEvent, Constraint, Money } from '@trailgate/core';
+import { formatMoneyWithCurrency } from '../../domain/money.ts';
 import { PERMISSIONS } from '../../tg/vocabulary.ts';
 import { esc, formatTime } from '../html.ts';
 import { csrfField, emptyState, pageHead, statusBadge } from '../layout.ts';
@@ -33,29 +34,56 @@ export interface IssuedGrantView {
   revocationActor?: string;
 }
 
+interface SiteCaps {
+  maxCharge: Money;
+  maxGrantBudget: Money;
+}
+
 /**
  * Post-issuance scope control: the user ticks what the agent may do and
- * the site applies it in place, covering every permission the shop
- * advertises — both removing and adding. Only the site can change a
- * grant's scope; the agent can never modify its own.
+ * sets its spending limits; the site applies both in place, covering every
+ * permission the shop advertises — both removing and adding. Only the site
+ * can change a grant's scope; the agent can never modify its own.
  */
-function permEditor(ctx: RenderCtx, grant: IssuedGrantView): string {
+function permEditor(ctx: RenderCtx, grant: IssuedGrantView, caps: SiteCaps): string {
   if (grant.status !== 'active') {
     return '';
   }
   const effective = new Set(grant.permissions);
+  const moneyParam = (type: string): Money | undefined => {
+    const found = grant.constraints.find((c) => c.type === type);
+    return found?.params as Money | undefined;
+  };
+  const dollars = (m: Money): string => (m.amount / 100).toFixed(2);
+  const maxCharge = moneyParam('max_amount') ?? caps.maxCharge;
+  const budget = moneyParam('cumulative_budget') ?? caps.maxGrantBudget;
   return `<details class="perm-editor">
-            <summary>Change permissions</summary>
-            <p class="muted">Tick what this agent may do. Anything you add or remove applies to its next request; removing everything revokes the connection instead.</p>
+            <summary>Change permissions and limits</summary>
+            <p class="muted">Tick what this agent may do and set its spending limits. Changes apply to its next request; to remove all access, revoke the connection.</p>
             <form method="post" action="/account/connections/${esc(grant.jti)}/scope">
               ${csrfField(ctx.session?.csrfToken)}
-              ${PERMISSIONS.map(
-                (p) => `<label class="scope-choice">
-                    <input type="checkbox" name="perm" value="${esc(p)}"${effective.has(p) ? ' checked' : ''}>
-                    <span>${esc(PERM_COPY[p] ?? p)} <span class="row-sub mono">${esc(p)}</span></span>
-                  </label>`,
-              ).join('')}
-              <button class="button button-small" type="submit">Save permissions</button>
+              <div class="scope-group">
+                <h4 class="scope-group-title">Permissions</h4>
+                <div class="consent-perms">${PERMISSIONS.map(
+                  (p) => `<label class="scope-choice">
+                      <input type="checkbox" name="perm" value="${esc(p)}"${effective.has(p) ? ' checked' : ''}>
+                      <span>${esc(PERM_COPY[p] ?? p)} <span class="row-sub mono">${esc(p)}</span></span>
+                    </label>`,
+                ).join('')}</div>
+              </div>
+              <div class="scope-group">
+                <h4 class="scope-group-title">Spending limits</h4>
+                <div class="scope-limits">
+                  <label class="scope-limit">Most per charge (${esc(caps.maxCharge.currency)})
+                    <input type="number" name="max_charge" min="0" step="0.01" value="${dollars(maxCharge)}">
+                  </label>
+                  <label class="scope-limit">Total budget (${esc(caps.maxGrantBudget.currency)})
+                    <input type="number" name="total_budget" min="0" step="0.01" value="${dollars(budget)}">
+                  </label>
+                </div>
+                <p class="faint">Site caps: ${esc(formatMoneyWithCurrency(caps.maxCharge))} per charge, ${esc(formatMoneyWithCurrency(caps.maxGrantBudget))} total. Blank fields reset to the cap.</p>
+              </div>
+              <button class="button button-small" type="submit">Save changes</button>
             </form>
           </details>`;
 }
@@ -64,6 +92,7 @@ export function renderConnections(
   ctx: RenderCtx,
   requests: GrantRequestView[],
   grants: IssuedGrantView[],
+  caps: SiteCaps,
 ): string {
   const now = Math.floor(Date.now() / 1000);
   const groups = {
@@ -79,7 +108,7 @@ export function renderConnections(
       .map((p) => `<li>${esc(PERM_COPY[p] ?? p)} <span class="row-sub mono">${esc(p)}</span></li>`)
       .join('');
     const narrowed = !sameSet(grant.permissions, grant.issuedPermissions);
-    const editor = permEditor(ctx, grant);
+    const editor = permEditor(ctx, grant, caps);
     const resources =
       grant.resources.length === 0
         ? '<span class="muted">None</span>'
@@ -181,6 +210,7 @@ export function renderGrantDetail(
   budget: { consumed: number; reserved: number; budgets: { amount: number; currency: string }[] },
   events: { id: string; event: AuditEvent }[],
   receipts: { id: string; decision: string; target: string; method: string; created_at: number }[],
+  caps: SiteCaps,
 ): string {
   const now = Math.floor(Date.now() / 1000);
   const effective =
@@ -234,7 +264,7 @@ export function renderGrantDetail(
       ${grant.revokedAt !== undefined ? `<dt>Revoked</dt><dd>${esc(formatTime(grant.revokedAt))}${grant.revocationReason !== undefined ? ` · ${esc(grant.revocationReason)}` : ''}${grant.revocationActor !== undefined ? ` · by ${esc(grant.revocationActor)}` : ''}</dd>` : ''}
       ${scopeRows}
       ${ledgerRows}
-    </dl>${permEditor(ctx, grant)}</div>
+    </dl>${permEditor(ctx, grant, caps)}</div>
     ${revokeBlock}
     <div class="section"><div class="section-head"><h3>Signed receipts issued under this grant</h3></div>
       ${receipts.length === 0 ? '<p class="muted">No receipts recorded yet.</p>' : `<div class="table-wrap"><table class="table"><thead><tr><th>Receipt</th><th>Request</th><th>Decision</th><th>At</th></tr></thead><tbody>${receiptRows}</tbody></table></div>`}

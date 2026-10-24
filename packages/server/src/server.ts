@@ -1,4 +1,4 @@
-import type { DiscoveryDocument } from '@trailgate/core';
+import type { Constraint, DiscoveryDocument } from '@trailgate/core';
 import { Codes, isTrailGateError, TrailGateError, toErrorResponse } from '@trailgate/core';
 import { decideRequestApproval } from './approvals.ts';
 import type { ResolvedServerConfig, TrailGateServerOptions } from './config.ts';
@@ -73,13 +73,19 @@ export interface TrailGateServer {
   revokeGrant(jti: string, input: { reason: string; actor: string }): Promise<void>;
   /**
    * Host-initiated post-issuance scope change (spec section 13): replaces
-   * the grant's effective permissions (and optionally resources) with any
-   * set inside the site's advertised vocabulary. Takes effect at the next
-   * enforcement pass without reissuing a JWT.
+   * the grant's effective permissions (and optionally resources and
+   * constraints) with any set inside the site's advertised vocabulary and
+   * registered constraint types. Takes effect at the next enforcement pass
+   * without reissuing a JWT.
    */
   updateGrantScope(
     jti: string,
-    input: { permissions: string[]; resources?: string[]; actor: string },
+    input: {
+      permissions: string[];
+      resources?: string[];
+      constraints?: Constraint[];
+      actor: string;
+    },
   ): Promise<IssuedGrantRecord>;
   /**
    * Records the user's decision on a per-request `approval_threshold`

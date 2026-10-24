@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { GrantPayload, GrantRequestBody } from '@trailgate/core';
+import type { Constraint, GrantPayload, GrantRequestBody } from '@trailgate/core';
 import {
   assertRequestedPermissionsKnown,
   base64urlEncode,
@@ -91,10 +91,12 @@ async function computeEffectiveScope(
       'refined constraints use a type this site does not evaluate',
     );
   }
+  const refinedLifetime =
+    effective.lifetimeSeconds ?? requested.requestedSeconds ?? config.defaultGrantSeconds;
   const lifetime =
     config.maxGrantSeconds !== undefined
-      ? Math.min(effective.lifetimeSeconds, config.maxGrantSeconds)
-      : effective.lifetimeSeconds;
+      ? Math.min(refinedLifetime, config.maxGrantSeconds)
+      : refinedLifetime;
   if (!Number.isInteger(lifetime) || lifetime < 1) {
     throw new TrailGateError(Codes.INTERNAL_ERROR, 'refineScope returned an invalid lifetime');
   }
@@ -527,6 +529,9 @@ export async function grantStatus(
       // removed) without a fresh consent flow.
       permissions: grant.effectivePermissions ?? grant.permissions,
       ...(grant.effectiveResources !== undefined ? { resources: grant.effectiveResources } : {}),
+      ...(grant.effectiveConstraints !== undefined
+        ? { constraints: grant.effectiveConstraints }
+        : {}),
     };
   }
   throw new TrailGateError(Codes.REQUEST_MALFORMED, 'request_id or grant_id is required');
@@ -570,7 +575,12 @@ export async function revokeGrant(
  */
 export async function updateGrantScope(
   jti: string,
-  input: { permissions: string[]; resources?: string[]; actor: string },
+  input: {
+    permissions: string[];
+    resources?: string[];
+    constraints?: Constraint[];
+    actor: string;
+  },
   config: ResolvedServerConfig,
 ): Promise<IssuedGrantRecord> {
   const record = await config.stores.grants.get(jti);
@@ -592,9 +602,21 @@ export async function updateGrantScope(
       { unknown },
     );
   }
+  if (input.constraints !== undefined) {
+    const supported = new Set(config.constraintTypes);
+    const bad = input.constraints.filter((c) => !supported.has(c.type));
+    if (bad.length > 0) {
+      throw new TrailGateError(
+        Codes.REQUEST_MALFORMED,
+        'constraints may only use types the site evaluates',
+        { rejected: bad.map((c) => c.type) },
+      );
+    }
+  }
   const updated = await config.stores.grants.updateScope(jti, {
     permissions: input.permissions,
     ...(input.resources !== undefined ? { resources: input.resources } : {}),
+    ...(input.constraints !== undefined ? { constraints: input.constraints } : {}),
     actor: input.actor,
     at: config.clock.now(),
   });

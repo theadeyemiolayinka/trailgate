@@ -103,6 +103,9 @@ export function createInMemoryGrantRegistry(): GrantRegistry {
         ...(record.effectiveResources !== undefined
           ? { resources: record.effectiveResources }
           : {}),
+        ...(record.effectiveConstraints !== undefined
+          ? { constraints: record.effectiveConstraints }
+          : {}),
       };
     },
     updateScope: async (jti, input) => {
@@ -114,6 +117,7 @@ export function createInMemoryGrantRegistry(): GrantRegistry {
         ...record,
         effectivePermissions: input.permissions,
         ...(input.resources !== undefined ? { effectiveResources: input.resources } : {}),
+        ...(input.constraints !== undefined ? { effectiveConstraints: input.constraints } : {}),
       };
       grants.set(jti, next);
       return next;

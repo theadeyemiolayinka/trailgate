@@ -102,6 +102,11 @@ export interface IssuedGrantRecord {
   effectivePermissions?: string[];
   /** Current effective resources after post-issuance scope changes. */
   effectiveResources?: string[];
+  /**
+   * Current effective constraints after post-issuance changes. Undefined
+   * means unmodified: the constraint set signed into the grant applies.
+   */
+  effectiveConstraints?: import('@trailgate/core').Constraint[];
   revokedAt?: number;
   revocationReason?: string;
   revocationActor?: string;
@@ -127,7 +132,13 @@ export interface GrantRegistry extends RevocationChecker, GrantScopeChecker {
    */
   updateScope(
     jti: string,
-    input: { permissions: string[]; resources?: string[]; actor: string; at: number },
+    input: {
+      permissions: string[];
+      resources?: string[];
+      constraints?: import('@trailgate/core').Constraint[];
+      actor: string;
+      at: number;
+    },
   ): Promise<IssuedGrantRecord | undefined>;
 }
 

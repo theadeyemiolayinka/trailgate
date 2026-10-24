@@ -26,7 +26,9 @@ export function openDatabase(path: string): Db {
 
 interface Migration {
   id: number;
-  sql: string;
+  sql?: string;
+  /** Conditional migration logic for changes that cannot be expressed idempotently in plain SQL. */
+  apply?: (db: Db) => void;
 }
 
 /**
@@ -280,6 +282,36 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_tg_grant_requests_agent ON tg_grant_requests(agent_jkt, created_at);
     `,
   },
+  {
+    id: 7,
+    sql: `
+      -- effective_constraints: the site's current constraint set after
+      -- post-issuance changes; NULL means the signed set applies.
+      ALTER TABLE tg_grants ADD COLUMN effective_constraints TEXT;
+      -- Backfill the issued set for grants written before migration 6
+      -- populated permissions: the request row's effective set is what was
+      -- signed into the grant.
+      UPDATE tg_grants SET permissions = COALESCE(
+        (SELECT r.effective_permissions FROM tg_grant_requests r
+          WHERE r.request_id = tg_grants.request_id),
+        (SELECT json_extract(r2.body, '$.permissions') FROM tg_grant_requests r2
+          WHERE r2.request_id = tg_grants.request_id),
+        '[]'
+      ) WHERE permissions = '[]';
+    `,
+  },
+  {
+    id: 8,
+    // Databases that applied an early draft of migration 6 can be missing
+    // tg_grants.effective_resources; ALTER COLUMN has no IF NOT EXISTS, so
+    // the column is added only when absent.
+    apply: (db) => {
+      const cols = db.prepare('PRAGMA table_info(tg_grants)').all() as { name: string }[];
+      if (!cols.some((c) => c.name === 'effective_resources')) {
+        db.exec('ALTER TABLE tg_grants ADD COLUMN effective_resources TEXT');
+      }
+    },
+  },
 ];
 
 export function migrate(db: Db): void {
@@ -295,7 +327,10 @@ export function migrate(db: Db): void {
     }
     db.exec('BEGIN');
     try {
-      db.exec(migration.sql);
+      if (migration.sql !== undefined) {
+        db.exec(migration.sql);
+      }
+      migration.apply?.(db);
       db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
         migration.id,
         Math.floor(Date.now() / 1000),

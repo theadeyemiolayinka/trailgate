@@ -68,7 +68,15 @@ export interface ServerStores {
  * the requested sets; sites MUST NOT loosen constraint params
  * (spec section 9.3).
  */
-export type ScopeRefiner = (requested: RequestedScope) => Promise<EffectiveScope> | EffectiveScope;
+/**
+ * Effective scope after host policy refinement. `lifetimeSeconds` may be
+ * omitted to defer to `requested_seconds ?? defaultGrantSeconds`; a site only
+ * returns it to override (still clamped to `maxGrantSeconds`).
+ */
+export type RefinedScope = Omit<EffectiveScope, 'lifetimeSeconds'> & {
+  lifetimeSeconds?: number;
+};
+export type ScopeRefiner = (requested: RequestedScope) => Promise<RefinedScope> | RefinedScope;
 
 export interface TrailGateServerOptions {
   /**

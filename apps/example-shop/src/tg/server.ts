@@ -137,7 +137,9 @@ export function createShopTrailGate(db: Db, config: ShopConfig): ShopTrailGate {
             }
           : c,
       ),
-      lifetimeSeconds: requested.requestedSeconds ?? 3600,
+      ...(requested.requestedSeconds !== undefined
+        ? { lifetimeSeconds: requested.requestedSeconds }
+        : {}),
     }),
     policy: {
       authorize: async (ctx) => {

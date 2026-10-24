@@ -445,11 +445,11 @@ export function createProtectedHandler(
     const amount = result.requestAmount;
     let reservation: Reservation | undefined;
     if (amount !== undefined) {
-      const budgets = grant.tg.constraints
+      const budgets = result.context.constraints
         .filter((c) => c.type === 'cumulative_budget')
         .map((c) => c.params as Money | undefined)
         .filter((p): p is Money => p !== undefined && p.currency === amount.currency);
-      const spendWindows = grant.tg.constraints
+      const spendWindows = result.context.constraints
         .filter((c) => c.type === 'spend_window')
         .map((c) => c.params as (Money & { window_seconds?: number }) | undefined)
         .filter(

@@ -735,48 +735,8 @@ function buildRoutes(ctx: Ctx): Router {
       });
       const grantRows = db
         .prepare('SELECT * FROM tg_grants WHERE subject = ? ORDER BY issued_at DESC')
-        .all(user.id) as {
-        jti: string;
-        issued_at: number;
-        expires_at: number;
-        agent_jkt: string;
-        status: 'active' | 'revoked';
-        request_id: string;
-        permissions: string;
-        effective_permissions: string | null;
-        revoked_at: number | null;
-        revocation_reason: string | null;
-        revocation_actor: string | null;
-      }[];
-      const grants: IssuedGrantView[] = grantRows.map((row) => {
-        const reqRow = db
-          .prepare(
-            'SELECT effective_resources, effective_constraints FROM tg_grant_requests WHERE request_id = ?',
-          )
-          .get(row.request_id) as
-          | {
-              effective_resources: string | null;
-              effective_constraints: string | null;
-            }
-          | undefined;
-        const jsonField = (value: string | null | undefined): unknown[] =>
-          value === null || value === undefined ? [] : (JSON.parse(value) as unknown[]);
-        const issuedPermissions = jsonField(row.permissions) as string[];
-        return {
-          jti: row.jti,
-          agentJkt: row.agent_jkt,
-          issuedAt: row.issued_at,
-          expiresAt: row.expires_at,
-          status: row.status,
-          issuedPermissions,
-          permissions: jsonField(row.effective_permissions ?? row.permissions) as string[],
-          resources: jsonField(reqRow?.effective_resources) as string[],
-          constraints: jsonField(reqRow?.effective_constraints) as IssuedGrantView['constraints'],
-          ...(row.revoked_at !== null ? { revokedAt: row.revoked_at } : {}),
-          ...(row.revocation_reason !== null ? { revocationReason: row.revocation_reason } : {}),
-          ...(row.revocation_actor !== null ? { revocationActor: row.revocation_actor } : {}),
-        };
-      });
+        .all(user.id) as Parameters<typeof grantViewOf>[0][];
+      const grants: IssuedGrantView[] = grantRows.map(grantViewOf);
       return render(ctx, req, {
         title: 'Agent connections',
         section: 'account',
@@ -784,6 +744,7 @@ function buildRoutes(ctx: Ctx): Router {
           { ...(req.session !== undefined ? { session: req.session } : {}) },
           requests,
           grants,
+          ctx.tg.spendingPolicy,
         ),
       });
     }),
@@ -832,10 +793,12 @@ function buildRoutes(ctx: Ctx): Router {
       requireCsrf(req, form);
       const formValues = parseFormValues(req);
       const jti = req.params.jti as string;
-      const grant = db.prepare('SELECT subject FROM tg_grants WHERE jti = ?').get(jti) as
-        | { subject: string | null }
+      const grantRow = db.prepare('SELECT * FROM tg_grants WHERE jti = ?').get(jti) as
+        | ({
+            subject: string | null;
+          } & Parameters<typeof grantViewOf>[0])
         | undefined;
-      if (grant?.subject !== user.id) {
+      if (grantRow?.subject !== user.id) {
         return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
       }
       const selected = formValues.perm ?? [];
@@ -852,10 +815,46 @@ function buildRoutes(ctx: Ctx): Router {
         .map((perm) => SCOPE_RESOURCE_TEMPLATE[perm])
         .filter((t): t is string => t !== undefined);
       const resources = templates.length > 0 ? bindShopSelectors(templates, user.id) : undefined;
+      // Spending limits are editable per grant; they clamp to the site
+      // policy caps and every other constraint the grant carries is kept.
+      const current = grantViewOf(grantRow);
+      const currency = ctx.tg.spendingPolicy.currency;
+      const kept = current.constraints.filter(
+        (c) => c.type !== 'max_amount' && c.type !== 'cumulative_budget',
+      );
+      const moneyField = (name: string, cap: number): number => {
+        const raw = form[name];
+        if (raw === undefined || raw.trim() === '') {
+          return cap;
+        }
+        const minor = Math.round(Number.parseFloat(raw) * 100);
+        if (!Number.isFinite(minor) || minor < 0) {
+          throw new TrailGateError(Codes.REQUEST_MALFORMED, `${name} must be a positive amount`);
+        }
+        return Math.min(minor, cap);
+      };
       try {
+        const constraints: IssuedGrantView['constraints'] = [
+          ...kept,
+          {
+            type: 'max_amount',
+            params: {
+              amount: moneyField('max_charge', ctx.tg.spendingPolicy.maxCharge.amount),
+              currency,
+            },
+          },
+          {
+            type: 'cumulative_budget',
+            params: {
+              amount: moneyField('total_budget', ctx.tg.spendingPolicy.maxGrantBudget.amount),
+              currency,
+            },
+          },
+        ];
         await ctx.tg.tg.updateGrantScope(jti, {
           permissions: selected,
           ...(resources !== undefined ? { resources } : {}),
+          constraints,
           actor: `user:${user.id}`,
         });
       } catch (err) {
@@ -878,6 +877,8 @@ function buildRoutes(ctx: Ctx): Router {
     request_id: string;
     permissions: string;
     effective_permissions: string | null;
+    effective_resources: string | null;
+    effective_constraints: string | null;
     revoked_at: number | null;
     revocation_reason: string | null;
     revocation_actor: string | null;
@@ -903,8 +904,10 @@ function buildRoutes(ctx: Ctx): Router {
       status: row.status,
       issuedPermissions,
       permissions: jsonField(row.effective_permissions ?? row.permissions) as string[],
-      resources: jsonField(reqRow?.effective_resources) as string[],
-      constraints: jsonField(reqRow?.effective_constraints) as IssuedGrantView['constraints'],
+      resources: jsonField(row.effective_resources ?? reqRow?.effective_resources) as string[],
+      constraints: jsonField(
+        row.effective_constraints ?? reqRow?.effective_constraints,
+      ) as IssuedGrantView['constraints'],
       ...(row.revoked_at !== null ? { revokedAt: row.revoked_at } : {}),
       ...(row.revocation_reason !== null ? { revocationReason: row.revocation_reason } : {}),
       ...(row.revocation_actor !== null ? { revocationActor: row.revocation_actor } : {}),
@@ -926,6 +929,8 @@ function buildRoutes(ctx: Ctx): Router {
             subject: string | null;
             permissions: string;
             effective_permissions: string | null;
+            effective_resources: string | null;
+            effective_constraints: string | null;
             revoked_at: number | null;
             revocation_reason: string | null;
             revocation_actor: string | null;
@@ -966,6 +971,7 @@ function buildRoutes(ctx: Ctx): Router {
           { consumed, reserved, budgets },
           ctx.tg.audit.listForGrant(jti),
           receipts,
+          ctx.tg.spendingPolicy,
         ),
       });
     }),

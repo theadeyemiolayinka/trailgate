@@ -52,12 +52,6 @@ function formatDuration(seconds: number): string {
   return `${seconds} seconds`;
 }
 
-function permissionList(permissions: string[]): string {
-  return `<ul>${permissions
-    .map((p) => `<li><span class="mono">${esc(p)}</span></li>`)
-    .join('')}</ul>`;
-}
-
 function resourceList(resources: string[]): string {
   if (resources.length === 0) {
     return '<span class="muted">No specific resources; access is limited to what the permissions allow on your account.</span>';
@@ -87,10 +81,10 @@ function permissionLabel(permission: string): string {
 }
 
 /**
- * The consent surface (spec section 10.3). Renders a plain-language summary of
- * the effective scope first, then the requested scope verbatim from the
- * stored grant request, then the effective scope the shop will actually issue
- * when it differs.
+ * The consent surface (spec section 10.3). One decision card carries the
+ * permission picker, the duration picker, and a live summary that updates as
+ * the user edits; the verbatim requested terms and site policy sit behind a
+ * collapsed details block.
  */
 export function renderConsent(
   ctx: RenderCtx,
@@ -105,7 +99,8 @@ export function renderConsent(
   const narrowed =
     effective.permissions.length !== requested.permissions.length ||
     effective.resources.length !== requested.resources.length ||
-    effective.lifetimeSeconds !== (requested.requestedSeconds ?? 3600) ||
+    (requested.requestedSeconds !== undefined &&
+      effective.lifetimeSeconds !== requested.requestedSeconds) ||
     JSON.stringify(effective.constraints) !== JSON.stringify(requested.constraints);
 
   const decided = view.status !== 'pending';
@@ -124,62 +119,49 @@ export function renderConsent(
     )
     .join('');
 
-  const denyCopy = `<div class="consent-term">
-      <h3>If you deny</h3>
-      <p>Denying records the decision, closes this request, and issues nothing. The agent is informed the request was denied and cannot redeem it. Your cart, orders, and wallet are untouched.</p>
-    </div>
-    <div class="consent-term">
-      <h3>When more approval is needed</h3>
-      <p>Approving creates one grant carrying exactly these terms. If the agent later wants more (new permissions, resources, or higher limits) it must submit a new request and you must approve again — it cannot widen this grant. Revoking stops everything from the next request onward.</p>
-    </div>`;
-  const redirectNote =
-    view.redirectUri !== undefined
-      ? `<p class="consent-note">After your decision you will be returned to the agent at <span class="mono-id">${esc(view.redirectUri)}</span>.</p>`
-      : '<p class="consent-note">The agent is waiting on a status check; there is no redirect.</p>';
+  const permChoices = effective.permissions
+    .map(
+      (p) => `<label class="scope-choice">
+        <input type="checkbox" name="perm" value="${esc(p)}" data-label="${esc(permissionLabel(p))}" checked>
+        <span>${esc(permissionLabel(p))} <span class="row-sub mono">${esc(p)}</span></span>
+      </label>`,
+    )
+    .join('');
 
   const decidedBlock = decided
-    ? `<div class="consent-term"><p>This request has already been decided: ${statusBadge(view.status)}</p>
-        <p style="margin:0"><a class="button button-secondary" href="/account/connections">View agent connections</a></p></div>`
-    : `<form method="post" action="/tg/consent/decide">
+    ? `<div class="consent-term consent-decision">
+        <h3>This request has been decided</h3>
+        <p>${statusBadge(view.status)}</p>
+        <p style="margin:0"><a class="button button-secondary" href="/account/connections">View agent connections</a></p>
+      </div>`
+    : `<div class="consent-term consent-decision">
+      <form class="consent-form" method="post" action="/tg/consent/decide">
         ${csrfField(ctx.session?.csrfToken)}
         <input type="hidden" name="request_id" value="${esc(view.requestId)}">
-        <fieldset class="scope-editor">
-          <legend>Approve exactly what this agent may do (uncheck to refuse)</legend>
-          ${effective.permissions
-            .map(
-              (p) => `<label class="scope-choice">
-              <input type="checkbox" name="perm" value="${esc(p)}" checked>
-              <span>${esc(permissionLabel(p))} <span class="row-sub mono">${esc(p)}</span></span>
-            </label>`,
-            )
-            .join('')}
-        </fieldset>
-        <label class="scope-choice" style="display:block;margin:var(--space-3) 0">
-          Keep this access for
-          <select name="lifetime_seconds">${durationOptions}</select>
-        </label>
+        <h3>Choose what this agent may do</h3>
+        <p class="muted" style="margin:0 0 var(--space-3)">Uncheck anything you do not want to allow. Approving can only ever grant what is listed here.</p>
+        <div class="consent-perms">${permChoices}</div>
+        <div class="consent-duration">
+          <label for="lifetime-seconds">Keep this access for</label>
+          <select id="lifetime-seconds" name="lifetime_seconds">${durationOptions}</select>
+        </div>
+        <p class="consent-live">This agent will be able to <strong data-perm-echo></strong> on ${esc(site.name)} for <strong data-duration-echo></strong>, until about <strong data-expiry-echo></strong>. You can revoke it any time from Agent connections.</p>
         <div class="consent-actions">
-          <button class="button" type="submit" name="decision" value="approve">Approve selected</button>
+          <button class="button" type="submit" name="decision" value="approve" data-approve-btn>Approve selected</button>
           <button class="button button-secondary" type="submit" name="decision" value="deny">Deny all</button>
         </div>
-      </form>`;
+        <p class="faint" style="margin:var(--space-3) 0 0">Denying closes this request and issues nothing. If the agent wants more later it must ask again and you approve again.</p>
+      </form>
+    </div>`;
 
-  const effectiveBlock = narrowed
-    ? `<div class="consent-term panel-sunken">
-        <h3>What the shop will actually issue</h3>
-        <p class="term-diff">ExampleShop narrowed the request. The grant will carry these terms, never more than requested.</p>
-        <dl class="dl">
-          <dt>Permissions</dt><dd>${permissionList(effective.permissions)}</dd>
-          <dt>Resources</dt><dd>${resourceList(effective.resources)}</dd>
-          <dt>Constraints</dt><dd>${constraintList(effective.constraints)}</dd>
-          <dt>Lifetime</dt><dd>${esc(formatDuration(effective.lifetimeSeconds))}</dd>
-        </dl>
-      </div>`
+  const narrowedNote = narrowed
+    ? `<p class="term-diff">ExampleShop narrowed this request. The grant will carry the terms below, never more than requested.</p>`
     : '';
 
-  const summaryPerms = effective.permissions
-    .map((p) => `<li>${esc(permissionLabel(p))}</li>`)
-    .join('');
+  const redirectLine =
+    view.redirectUri !== undefined
+      ? `After your decision you will be returned to the agent at <span class="mono-id">${esc(view.redirectUri)}</span>.`
+      : 'The agent is waiting on a status check; there is no redirect.';
 
   return `
 <div class="consent-frame">
@@ -191,60 +173,48 @@ export function renderConsent(
     </div>
   </div>
 
-  <div class="consent-terms">
-    <div class="consent-term consent-summary">
-      <h3>At a glance</h3>
-      <p>This agent will be able to:</p>
-      <ul>${summaryPerms}</ul>
-      <p style="margin:var(--space-3) 0 0">Effective for <strong>${esc(formatDuration(effective.lifetimeSeconds))}</strong>, on <strong>${esc(site.name)}</strong> only.</p>
-    </div>
-    <div class="consent-term">
-      <h3>Site granting access</h3>
-      <p><strong>${esc(site.name)}</strong> <span class="mono-id">${esc(site.issuer)}</span></p>
-      <p class="faint" style="margin:0">The grant, receipts, and spending ledger are issued and enforced by this origin only.</p>
-    </div>
-    <div class="consent-term">
-      <h3>Agent being authorized</h3>
-      <dl class="dl">
-        <dt>Key thumbprint</dt><dd><span class="mono-id">${esc(view.agentJkt)}</span></dd>
-      </dl>
-      <p class="faint" style="margin:0">Verified by the protocol: the grant binds to this exact key, and every request must be signed by its private half. Draft 0.1 carries no verified agent name or vendor claim — anything the agent says about itself is descriptive, not verified identity.</p>
-    </div>
-    <div class="consent-term panel-sunken">
-      <h3>Site spending policy</h3>
-      <ul>
-        <li>any single charge is capped at <strong>${esc(formatMoneyWithCurrency(site.spendingPolicy.maxCharge))}</strong></li>
-        <li>a grant's total budget is capped at <strong>${esc(formatMoneyWithCurrency(site.spendingPolicy.maxGrantBudget))}</strong> even if more is requested</li>
-        <li>currency: <strong>${esc(site.spendingPolicy.maxCharge.currency)}</strong> only</li>
-      </ul>
-    </div>
-    <div class="consent-term">
-      <h3>Permissions requested</h3>
-      <ul>${requested.permissions
-        .map(
-          (p) => `<li>${esc(permissionLabel(p))} <span class="row-sub mono">${esc(p)}</span></li>`,
-        )
-        .join('')}</ul>
-    </div>
-    <div class="consent-term">
-      <h3>Resources requested</h3>
-      ${resourceList(requested.resources)}
-    </div>
-    <div class="consent-term">
-      <h3>Limits proposed by the agent</h3>
-      ${constraintList(requested.constraints)}
-    </div>
-    <div class="consent-term">
-      <h3>Lifetime</h3>
-      <p>Requested <strong>${esc(formatDuration(requested.requestedSeconds ?? 3600))}</strong>; effective <strong>${esc(formatDuration(effective.lifetimeSeconds))}</strong>.</p>
-      <p class="faint" style="margin:0">This request expires ${esc(formatTime(view.expiresAt))} if undecided. You can revoke an issued grant at any time from Agent connections.</p>
-    </div>
-    ${effectiveBlock}
-    ${denyCopy}
-  </div>
-
   ${decidedBlock}
-  ${redirectNote}
-  <p class="consent-note">Approving issues a grant carrying exactly the terms above. ExampleShop enforces them on every signed request; the agent cannot exceed them by changing what it sends. TrailGate is experimental; review the terms before approving.</p>
-</div>`;
+
+  <details class="consent-term consent-details">
+    <summary>Request details and site policy</summary>
+    ${narrowedNote}
+    <dl class="dl">
+      <dt>Site</dt><dd><strong>${esc(site.name)}</strong> <span class="mono-id">${esc(site.issuer)}</span></dd>
+      <dt>Agent key</dt><dd><span class="mono-id">${esc(view.agentJkt)}</span></dd>
+      <dt>Resources</dt><dd>${resourceList(effective.resources)}</dd>
+      <dt>Limits</dt><dd>${constraintList(effective.constraints)}</dd>
+      <dt>Lifetime</dt><dd>${requested.requestedSeconds !== undefined ? `requested ${esc(formatDuration(requested.requestedSeconds))}, ` : ''}defaults to ${esc(formatDuration(effective.lifetimeSeconds))}, yours up to ${esc(formatDuration(view.lifetimeCapSeconds))}</dd>
+      <dt>Request expires</dt><dd>${esc(formatTime(view.expiresAt))} if undecided</dd>
+    </dl>
+    <p class="faint">Spending policy: charges capped at ${esc(formatMoneyWithCurrency(site.spendingPolicy.maxCharge))} each, total budget ${esc(formatMoneyWithCurrency(site.spendingPolicy.maxGrantBudget))}, ${esc(site.spendingPolicy.maxCharge.currency)} only.</p>
+    <p class="faint">${redirectLine}</p>
+  </details>
+
+  <p class="consent-note">Approving issues a grant carrying exactly the selected terms. ExampleShop enforces them on every signed request; the agent cannot exceed them by changing what it sends. TrailGate is experimental; review before approving.</p>
+</div>
+<script>
+(function () {
+  var form = document.querySelector('.consent-form');
+  if (!form) return;
+  var permEcho = form.querySelector('[data-perm-echo]');
+  var durationEcho = form.querySelector('[data-duration-echo]');
+  var expiryEcho = form.querySelector('[data-expiry-echo]');
+  var approve = form.querySelector('[data-approve-btn]');
+  var select = form.querySelector('select[name="lifetime_seconds"]');
+  function sync() {
+    var labels = [];
+    var boxes = form.querySelectorAll('input[name="perm"]');
+    for (var i = 0; i < boxes.length; i++) {
+      if (boxes[i].checked) labels.push(boxes[i].getAttribute('data-label'));
+    }
+    if (permEcho) permEcho.textContent = labels.length > 0 ? labels.join(', ').toLowerCase() : 'nothing (approve is disabled)';
+    var seconds = Number(select.value);
+    if (durationEcho) durationEcho.textContent = select.options[select.selectedIndex].textContent;
+    if (expiryEcho) expiryEcho.textContent = new Date(Date.now() + seconds * 1000).toLocaleString();
+    if (approve) approve.disabled = labels.length === 0;
+  }
+  form.addEventListener('change', sync);
+  sync();
+})();
+</script>`;
 }

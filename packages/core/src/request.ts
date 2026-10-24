@@ -198,6 +198,7 @@ export async function verifyProtectedRequest(
   // evidence of the original consent and the key binding.
   let effectivePermissions = grant.tg.permissions;
   let effectiveResources = grant.tg.resources;
+  let effectiveConstraints = grant.tg.constraints;
   if (deps.grantScope !== undefined) {
     const scope = await callPort(
       () => deps.grantScope?.currentScope(grant.jti) ?? Promise.resolve(undefined),
@@ -208,6 +209,9 @@ export async function verifyProtectedRequest(
     }
     if (scope?.resources !== undefined) {
       effectiveResources = [...scope.resources];
+    }
+    if (scope?.constraints !== undefined) {
+      effectiveConstraints = [...scope.constraints];
     }
   }
 
@@ -291,7 +295,7 @@ export async function verifyProtectedRequest(
   }
 
   const requestAmount = deps.resolveRequestAmount?.(grant) ?? deps.requestAmount;
-  await evaluateConstraints(grant.tg.constraints, {
+  await evaluateConstraints(effectiveConstraints, {
     grantId: grant.jti,
     now: clock.now(),
     operationDigest,
@@ -306,6 +310,7 @@ export async function verifyProtectedRequest(
     grantId: grant.jti,
     permissions: effectivePermissions,
     resources: effectiveResources,
+    constraints: effectiveConstraints,
     method: req.method,
     url: req.url,
     requestDigest,

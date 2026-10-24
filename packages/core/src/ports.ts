@@ -1,5 +1,5 @@
 import { Codes, TrailGateError } from './errors.ts';
-import type { Jwk } from './types.ts';
+import type { Constraint, Jwk } from './types.ts';
 
 export async function callPort<T>(fn: () => Promise<T>, unavailable: string): Promise<T> {
   try {
@@ -46,6 +46,12 @@ export interface RevocationChecker {
 export interface GrantScope {
   permissions?: readonly string[];
   resources?: readonly string[];
+  /**
+   * The site's current effective constraints; replaces the signed set when
+   * present. Only the site can write it; the JWT remains evidence of the
+   * constraints the user originally consented to.
+   */
+  constraints?: readonly Constraint[];
 }
 
 export interface GrantScopeChecker {
@@ -101,6 +107,8 @@ export interface VerifiedRequestContext {
   subject?: string;
   permissions: string[];
   resources: string[];
+  /** The constraint set enforcement evaluated (post-issuance effective set). */
+  constraints: Constraint[];
   method: string;
   url: string;
   requestDigest: string;
