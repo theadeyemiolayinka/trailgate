@@ -51,6 +51,62 @@ function fail(err: unknown): ToolResult {
 }
 
 /**
+ * Layman-readable one-liners for results the model relays to the user.
+ * Tool output stays jargon-light: `summary` is what the user should hear,
+ * while `code` remains for machines.
+ */
+function summaryFor(code: string): string {
+  switch (code) {
+    case 'tg.request.permission_denied':
+      return "You haven't allowed that yet.";
+    case 'tg.request.resource_denied':
+      return "You haven't allowed access to that.";
+    case 'tg.request.grant_invalid':
+      return 'The access on file is no longer valid.';
+    case 'tg.request.grant_expired':
+      return 'The access has expired.';
+    case 'tg.request.grant_revoked':
+      return 'You revoked this access.';
+    case 'tg.constraint.approval_required':
+      return 'This needs your approval for this specific charge.';
+    case 'tg.constraint.violated':
+      return 'This goes over a limit you set.';
+    case 'tg.request.rate_limited':
+      return 'The site is limiting how fast new access can be requested.';
+    case 'agent.no_grant':
+      return 'No access has been granted for this site yet.';
+    case 'agent.insufficient_permission':
+      return 'The access on file does not cover this.';
+    case 'agent.denied':
+      return 'This was not allowed.';
+    default:
+      return 'Something was not allowed.';
+  }
+}
+
+/** Plain-English wording for local access-check statuses. */
+function accessSummary(status: string): string {
+  switch (status) {
+    case 'ready':
+      return 'Access is in place.';
+    case 'no_grant':
+      return 'Nothing has been granted for this site yet.';
+    case 'insufficient_permission':
+      return 'The access on file does not cover this.';
+    case 'expired':
+      return 'The access has expired.';
+    case 'revoked':
+      return 'You revoked this access.';
+    case 'wrong_key':
+      return 'The access belongs to a different key.';
+    case 'unsupported_version':
+      return 'This site speaks a version this client does not understand.';
+    default:
+      return 'Access is not usable.';
+  }
+}
+
+/**
  * Model-facing advice attached to failures. Denials are terminal from the
  * agent's point of view: the correct response is to report back to the
  * user, never to self-escalate with a fresh access request.
@@ -75,7 +131,7 @@ function guidanceFor(code: string): string | undefined {
 }
 
 function okError(code: string, message: string): ToolResult {
-  const error: Record<string, unknown> = { code, message };
+  const error: Record<string, unknown> = { code, message, summary: summaryFor(code) };
   const guidance = guidanceFor(code);
   if (guidance !== undefined) {
     error.guidance = guidance;
@@ -199,7 +255,7 @@ export function createTrailGateTools(
     {
       name: 'trailgate.actions',
       description:
-        "List the actions a site advertises, each annotated with local grant coverage. Use this to map a user intent to a concrete endpoint and the permission to request at consent time. Coverage is advisory: the site's pipeline decides authorization on every request. Uncovered entries report the permission to include in trailgate.request.",
+        'List what a site lets agents do, each with a plain-English `name` to use when talking to the user. `covered` means existing access already allows it; uncovered entries are reported to the user as things they have not allowed yet. Use this to map what the user asked for onto the right endpoint. Coverage is advisory: the site decides on every request.',
       inputSchema: {
         type: 'object',
         properties: { url: URL_ARG },
@@ -211,18 +267,17 @@ export function createTrailGateTools(
           const coverage = await client.listActions(requireString(args, 'url'));
           return ok({
             actions: coverage.map((entry) => ({
+              name: entry.action.description,
               id: entry.action.id,
               method: entry.action.method,
               path: entry.action.path,
+              covered: entry.covered,
               permission: entry.action.permission,
-              description: entry.action.description,
               mutates: entry.action.mutates ?? true,
               resource: entry.action.resource,
               spend: entry.action.spend,
-              covered: entry.covered,
-              grant: entry.grant?.jti,
-              missing: entry.missing,
             })),
+            note: 'Describe these to the user using `name`, never raw ids or permission strings. For uncovered entries, report what is not yet allowed rather than requesting access on your own.',
           });
         } catch (err) {
           return fail(err);
@@ -309,7 +364,7 @@ export function createTrailGateTools(
     {
       name: 'trailgate.access',
       description:
-        'Check whether usable access already exists locally for a site and scope before acting. Statuses: ready, no_grant, insufficient_permission, expired, wrong_key, revoked, unsupported_version. A shortfall means report it to the user, not start a new request. Never proves access: the site decides at enforcement.',
+        "Check whether usable access already exists locally for a site and scope before acting. Statuses: ready, no_grant, insufficient_permission, expired, wrong_key, revoked, unsupported_version. Set fresh to true to also ask the site for the grant's current scope, which picks up permissions the user added or removed on the site since granting. A shortfall means report it to the user, not start a new request. Never proves access: the site decides at enforcement.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -337,6 +392,7 @@ export function createTrailGateTools(
             view.site = result.site;
             view.client = result.client;
           }
+          view.summary = accessSummary(result.status);
           if (result.status !== 'ready') {
             const hint = guidanceFor(`agent.${result.status}`);
             if (hint !== undefined) {
@@ -397,6 +453,7 @@ export function createTrailGateTools(
               ? {
                   error: {
                     ...res.error,
+                    summary: summaryFor(res.error.code),
                     ...(hint !== undefined ? { guidance: hint } : {}),
                   },
                 }

@@ -353,7 +353,7 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
 
     async checkAccess(target, criteria = {}): Promise<AccessCheck> {
       const context = await site(target);
-      return checkAccessAsync(context, await store.list(), criteria, {
+      const result = await checkAccessAsync(context, await store.list(), criteria, {
         clock,
         signers,
         clientVersions: versions,
@@ -364,6 +364,20 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
             }
           : {}),
       });
+      // Persist scope the site reported so later non-fresh checks (and the
+      // grant listing) reflect permissions the site added or removed.
+      const seen = 'grant' in result ? result.grant : undefined;
+      if (seen !== undefined) {
+        const stored = await store.get(seen.jti);
+        if (
+          stored !== undefined &&
+          (stored.permissions.join() !== seen.permissions.join() ||
+            stored.resources.join() !== seen.resources.join())
+        ) {
+          await store.put(seen);
+        }
+      }
+      return result;
     },
 
     async listActions(target): Promise<ActionCoverage[]> {

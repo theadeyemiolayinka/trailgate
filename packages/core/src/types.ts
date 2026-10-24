@@ -155,6 +155,7 @@ export type AuditEventType =
   | 'grant.consent_decided'
   | 'grant.issued'
   | 'grant.revoked'
+  | 'grant.scope_changed'
   | 'request.authenticated'
   | 'request.denied'
   | 'reservation.created'

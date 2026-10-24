@@ -13,7 +13,7 @@ import {
 import type { ResolvedServerConfig } from './config.ts';
 import { assertRequestLimits, verifyAgentRequest } from './enforcement.ts';
 import { randomId } from './ids.ts';
-import type { GrantRequestRecord } from './ports.ts';
+import type { GrantRequestRecord, IssuedGrantRecord } from './ports.ts';
 import { signGrantJwt } from './signing.ts';
 import type {
   ConsentDecision,
@@ -197,6 +197,22 @@ export async function submitGrantRequest(
   }
 
   const agentJkt = jwkThumbprint(request.agent_key);
+
+  // Intake rate limiting: one agent key may hold a bounded number of open
+  // requests and create a bounded number per minute. Denied requests still
+  // count against the minute window so retry floods cannot bypass it.
+  const now0 = config.clock.now();
+  const [pending, recent] = await Promise.all([
+    config.stores.grantRequests.countByAgent(agentJkt, 0, ['pending', 'approved']),
+    config.stores.grantRequests.countByAgent(agentJkt, now0 - 60),
+  ]);
+  if (pending >= config.maxPendingRequestsPerAgent || recent >= config.maxGrantRequestsPerMinute) {
+    throw new TrailGateError(
+      Codes.REQUEST_RATE_LIMITED,
+      'too many open grant requests; wait for existing requests to be decided or expire',
+    );
+  }
+
   const requestedScope: RequestedScope = {
     permissions: request.permissions,
     resources: request.resources,
@@ -435,6 +451,7 @@ export async function redeemGrant(
     agentJkt: record.agentJkt,
     requestId: record.requestId,
     status: 'active',
+    permissions: [...(payload.tg.permissions as string[])],
     ...(record.subject !== undefined ? { subject: record.subject } : {}),
   });
   await config.stores.audit.record({
@@ -485,7 +502,16 @@ export async function grantStatus(
     }
     const status =
       grant.status === 'revoked' ? 'revoked' : grant.expiresAt <= now ? 'expired' : 'active';
-    return { status, issued_at: grant.issuedAt, expires_at: grant.expiresAt };
+    return {
+      status,
+      issued_at: grant.issuedAt,
+      expires_at: grant.expiresAt,
+      // The site's current effective scope, so agents can learn
+      // post-issuance changes (permissions the site later allowed or
+      // removed) without a fresh consent flow.
+      permissions: grant.effectivePermissions ?? grant.permissions,
+      ...(grant.effectiveResources !== undefined ? { resources: grant.effectiveResources } : {}),
+    };
   }
   throw new TrailGateError(Codes.REQUEST_MALFORMED, 'request_id or grant_id is required');
 }
@@ -515,6 +541,59 @@ export async function revokeGrant(
     reason: input.reason,
     actor: input.actor,
   });
+}
+
+/**
+ * Host-initiated post-issuance scope change (spec section 13): the site
+ * replaces the grant's effective permission (and optionally resource) set.
+ * Only the site can do this; agents can never modify their own scope. The
+ * set must stay inside the site's advertised permission vocabulary, and an
+ * empty set is refused — removing every permission is a revocation.
+ * Enforcement treats the stored scope as live state; it takes effect on
+ * the next request without reissuing a JWT.
+ */
+export async function updateGrantScope(
+  jti: string,
+  input: { permissions: string[]; resources?: string[]; actor: string },
+  config: ResolvedServerConfig,
+): Promise<IssuedGrantRecord> {
+  const record = await config.stores.grants.get(jti);
+  if (record === undefined) {
+    throw new TrailGateError(Codes.GRANT_UNKNOWN, 'unknown grant');
+  }
+  if (input.permissions.length === 0) {
+    throw new TrailGateError(
+      Codes.REQUEST_MALFORMED,
+      'removing every permission is a revocation; use revokeGrant',
+    );
+  }
+  const vocabulary = new Set(config.permissions);
+  const unknown = input.permissions.filter((permission) => !vocabulary.has(permission));
+  if (unknown.length > 0) {
+    throw new TrailGateError(
+      Codes.REQUEST_MALFORMED,
+      'scope may only contain permissions the site advertises',
+      { unknown },
+    );
+  }
+  const updated = await config.stores.grants.updateScope(jti, {
+    permissions: input.permissions,
+    ...(input.resources !== undefined ? { resources: input.resources } : {}),
+    actor: input.actor,
+    at: config.clock.now(),
+  });
+  if (updated === undefined) {
+    throw new TrailGateError(Codes.GRANT_UNKNOWN, 'unknown or already revoked grant');
+  }
+  await config.stores.audit.record({
+    event: 'grant.scope_changed',
+    at: config.clock.now(),
+    grant_id: jti,
+    actor: input.actor,
+    permissions: input.permissions,
+    ...(record.subject !== undefined ? { sub: record.subject } : {}),
+  });
+  return updated;
 }
 
 /**

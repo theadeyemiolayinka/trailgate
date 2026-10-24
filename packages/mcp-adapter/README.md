@@ -19,8 +19,10 @@ Existing grants are the only authority for ordinary work. The tool layer enforce
 
 - `trailgate.request` requires `user_authorized: true`, which the model may only set when the user's latest message explicitly asked for new or expanded access. Missing or false rejects the call before any consent URL exists. The `beforeAction` gate runs on top of that check.
 - Denials (`tg.request.permission_denied`, `tg.request.resource_denied`, expired/revoked/invalid grants, `agent.no_grant`) return an `error.guidance` field telling the model to report the shortfall and wait, not self-escalate.
-- The consent page lets the user uncheck permissions before approving, so approved scope is always a subset of the requested scope. An approve with nothing checked is rejected rather than granting broad access.
+- The consent page lets the user uncheck permissions before approving, so approved scope is always a subset of the requested scope. An approve with nothing checked is rejected rather than granting broad access. The user can also change permissions later on the site's own grant-management surface — both removing and re-adding — and enforcement reads that current scope on every request. Only the site can change a grant's scope; the agent can never modify its own.
 - Successful `trailgate.request` results carry a `note` instructing the model to relay only the consent URL and no protocol internals.
+- Results are layman-readable: every error carries a plain `summary` ("You haven't allowed that yet.") alongside the machine `code`, actions carry a plain `name`, and access checks report `summary` text. The model should relay those, not protocol jargon.
+- The site's grant-request endpoint rate-limits per agent key (bounded open requests plus a per-minute cap, `tg.request.rate_limited`), so a misbehaving agent cannot mint unbounded consent URLs.
 
 ## Boundary rules (not provisional)
 

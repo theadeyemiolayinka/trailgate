@@ -37,8 +37,14 @@ export interface AccessDeps {
   signers?: ReadonlyMap<string, AgentSigner>;
   /** Protocol versions this client speaks; defaults to the supported set. */
   clientVersions?: readonly string[];
-  /** Optional live status lookup (spec section 10.5); used by `confirmFresh`. */
-  statusOf?: (grantId: string) => Promise<{ status: string }>;
+  /**
+   * Optional live status lookup (spec section 10.5); used by
+   * `confirmFresh`. The response may carry the site's current effective
+   * scope (`permissions`, `resources`).
+   */
+  statusOf?: (
+    grantId: string,
+  ) => Promise<{ status: string; permissions?: string[]; resources?: string[] }>;
 }
 
 function missingPermissions(record: StoredGrantRecord, needed: readonly string[]): string[] {
@@ -123,9 +129,13 @@ export function checkAccess(
 }
 
 /**
- * Same as `checkAccess` plus an optional live `grant_status` confirmation
- * (`criteria.confirmFresh`): a `ready` result is re-checked against the
- * site so a revoked grant surfaces as `revoked` instead of looking usable.
+ * Same as `checkAccess` plus an optional live `grant_status` refresh
+ * (`criteria.confirmFresh`): stored grants are reconciled with the site's
+ * current effective scope first — permissions the site later allowed or
+ * removed are adopted — then a `ready` result is re-checked so a revoked
+ * grant surfaces as `revoked` instead of looking usable. Scope updates
+ * reported by the site are applied to the records, so callers should
+ * treat returned records as fresh and persist them if they keep copies.
  */
 export async function checkAccessAsync(
   site: SiteContext,
@@ -133,7 +143,29 @@ export async function checkAccessAsync(
   criteria: AccessCriteria = {},
   deps: AccessDeps = {},
 ): Promise<AccessCheck> {
-  const result = checkAccess(site, grants, criteria, deps);
+  let records = grants;
+  if (criteria.confirmFresh === true && deps.statusOf !== undefined) {
+    records = await Promise.all(
+      grants.map(async (record) => {
+        try {
+          const fresh = await deps.statusOf?.(record.jti);
+          if (fresh === undefined) {
+            return record;
+          }
+          return {
+            ...record,
+            ...(fresh.permissions !== undefined ? { permissions: [...fresh.permissions] } : {}),
+            ...(fresh.resources !== undefined ? { resources: [...fresh.resources] } : {}),
+          };
+        } catch {
+          // A failed status lookup must not downgrade local evidence;
+          // enforcement remains authoritative either way.
+          return record;
+        }
+      }),
+    );
+  }
+  const result = checkAccess(site, records, criteria, deps);
   if (result.status !== 'ready' || criteria.confirmFresh !== true || deps.statusOf === undefined) {
     return result;
   }

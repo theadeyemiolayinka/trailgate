@@ -1,4 +1,5 @@
 import type { AuditEvent, Constraint } from '@trailgate/core';
+import { PERMISSIONS } from '../../tg/vocabulary.ts';
 import { esc, formatTime } from '../html.ts';
 import { csrfField, emptyState, pageHead, statusBadge } from '../layout.ts';
 import type { RenderCtx } from '../render.ts';
@@ -21,12 +22,42 @@ export interface IssuedGrantView {
   issuedAt: number;
   expiresAt: number;
   status: 'active' | 'revoked';
+  /** Permissions signed into the grant; the ceiling narrowing can never exceed. */
+  issuedPermissions: string[];
+  /** Currently effective permissions (issued, or narrowed on this page). */
   permissions: string[];
   resources: string[];
   constraints: Constraint[];
   revokedAt?: number;
   revocationReason?: string;
   revocationActor?: string;
+}
+
+/**
+ * Post-issuance scope control: the user ticks what the agent may do and
+ * the site applies it in place, covering every permission the shop
+ * advertises — both removing and adding. Only the site can change a
+ * grant's scope; the agent can never modify its own.
+ */
+function permEditor(ctx: RenderCtx, grant: IssuedGrantView): string {
+  if (grant.status !== 'active') {
+    return '';
+  }
+  const effective = new Set(grant.permissions);
+  return `<details class="perm-editor">
+            <summary>Change permissions</summary>
+            <p class="muted">Tick what this agent may do. Anything you add or remove applies to its next request; removing everything revokes the connection instead.</p>
+            <form method="post" action="/account/connections/${esc(grant.jti)}/scope">
+              ${csrfField(ctx.session?.csrfToken)}
+              ${PERMISSIONS.map(
+                (p) => `<label class="scope-choice">
+                    <input type="checkbox" name="perm" value="${esc(p)}"${effective.has(p) ? ' checked' : ''}>
+                    <span>${esc(PERM_COPY[p] ?? p)} <span class="row-sub mono">${esc(p)}</span></span>
+                  </label>`,
+              ).join('')}
+              <button class="button button-small" type="submit">Save permissions</button>
+            </form>
+          </details>`;
 }
 
 export function renderConnections(
@@ -47,6 +78,8 @@ export function renderConnections(
     const perms = grant.permissions
       .map((p) => `<li>${esc(PERM_COPY[p] ?? p)} <span class="row-sub mono">${esc(p)}</span></li>`)
       .join('');
+    const narrowed = !sameSet(grant.permissions, grant.issuedPermissions);
+    const editor = permEditor(ctx, grant);
     const resources =
       grant.resources.length === 0
         ? '<span class="muted">None</span>'
@@ -68,6 +101,7 @@ export function renderConnections(
                 <div><a class="mono-id" href="/account/connections/${esc(grant.jti)}">${esc(grant.jti)}</a></div>
                 ${statusBadge(grantEffectiveStatus(grant, now))}
               </div>
+              ${narrowed ? '<p class="faint" style="margin:var(--space-2) 0 0">Permissions changed after granting.</p>' : ''}
               <dl class="dl" style="margin-top: var(--space-4)">
                 <dt>Agent key</dt><dd><span class="mono-id">${esc(grant.agentJkt)}</span></dd>
                 <dt>Issued</dt><dd>${esc(formatTime(grant.issuedAt))}</dd>
@@ -76,6 +110,7 @@ export function renderConnections(
                 <dt>Resources</dt><dd>${resources}</dd>
                 <dt>Constraints</dt><dd>${constraints}</dd>
               </dl>
+              ${editor}
               ${revoke}
             </div>`;
   };
@@ -199,7 +234,7 @@ export function renderGrantDetail(
       ${grant.revokedAt !== undefined ? `<dt>Revoked</dt><dd>${esc(formatTime(grant.revokedAt))}${grant.revocationReason !== undefined ? ` · ${esc(grant.revocationReason)}` : ''}${grant.revocationActor !== undefined ? ` · by ${esc(grant.revocationActor)}` : ''}</dd>` : ''}
       ${scopeRows}
       ${ledgerRows}
-    </dl></div>
+    </dl>${permEditor(ctx, grant)}</div>
     ${revokeBlock}
     <div class="section"><div class="section-head"><h3>Signed receipts issued under this grant</h3></div>
       ${receipts.length === 0 ? '<p class="muted">No receipts recorded yet.</p>' : `<div class="table-wrap"><table class="table"><thead><tr><th>Receipt</th><th>Request</th><th>Decision</th><th>At</th></tr></thead><tbody>${receiptRows}</tbody></table></div>`}
@@ -220,6 +255,10 @@ const PERM_COPY: Record<string, string> = {
   'tg.wallet.read': 'read wallet balance and activity',
   'tg.wallet.charge': 'charge your wallet',
 };
+
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((item) => b.includes(item));
+}
 
 export function grantEffectiveStatus(
   grant: { status: string; expiresAt: number },

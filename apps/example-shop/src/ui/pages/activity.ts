@@ -15,6 +15,7 @@ const EVENT_LABELS: Record<string, string> = {
   'grant.consent_decided': 'Consent decision recorded',
   'grant.issued': 'Grant issued',
   'grant.revoked': 'Grant revoked',
+  'grant.scope_changed': 'Grant permissions changed',
   'request.authenticated': 'Signed request accepted',
   'request.denied': 'Request denied',
   'reservation.created': 'Spending reserved',

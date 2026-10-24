@@ -110,6 +110,50 @@ export function runPortContractSuite(
       assert.equal(await s.agentKeys.resolve('jkt-absent'), undefined);
     });
 
+    it('countByAgent counts recent and open requests per key', async () => {
+      const s = await makeStores();
+      const at = NOW();
+      await s.grantRequests.insert(makeGrantRequest('req_c1', at));
+      await s.grantRequests.insert(makeGrantRequest('req_c2', at - 120));
+      assert.equal(await s.grantRequests.countByAgent('jkt-conf', at - 60), 1);
+      assert.equal(await s.grantRequests.countByAgent('jkt-conf', 0), 2);
+      assert.equal(await s.grantRequests.countByAgent('jkt-conf', 0, ['denied']), 0);
+      assert.equal(await s.grantRequests.countByAgent('jkt-other', 0), 0);
+    });
+
+    it('updateScope replaces effective scope and currentScope reflects it', async () => {
+      const s = await makeStores();
+      const at = NOW();
+      await s.grants.insert({
+        jti: 'grt_n1',
+        issuedAt: at,
+        expiresAt: at + 3600,
+        agentJkt: 'jkt-conf',
+        requestId: 'req_c1',
+        status: 'active',
+        permissions: ['tg.a.b', 'tg.c.d'],
+      });
+      const before = await s.grants.currentScope('grt_n1');
+      assert.deepEqual(before?.permissions, ['tg.a.b', 'tg.c.d']);
+      const narrowed = await s.grants.updateScope('grt_n1', {
+        permissions: ['tg.a.b'],
+        actor: 'user_1',
+        at: at + 5,
+      });
+      assert.deepEqual(narrowed?.effectivePermissions, ['tg.a.b']);
+      const after = await s.grants.currentScope('grt_n1');
+      assert.deepEqual(after?.permissions, ['tg.a.b']);
+      // Revoked or absent grants have no live scope and cannot be rescoped.
+      assert.equal(
+        await s.grants.updateScope('grt_absent', {
+          permissions: ['tg.a.b'],
+          actor: 'user_1',
+          at: at + 6,
+        }),
+        undefined,
+      );
+    });
+
     it('revocation is atomic and applied once', async () => {
       const at = NOW();
       const s = await makeStores();
@@ -120,6 +164,7 @@ export function runPortContractSuite(
         agentJkt: 'jkt-conf',
         requestId: 'req_c1',
         status: 'active',
+        permissions: ['tg.a.b'],
       });
       assert.equal(await s.grants.isRevoked('grt_c1'), false);
       const revoked = await s.grants.revoke('grt_c1', {

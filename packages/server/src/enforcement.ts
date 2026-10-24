@@ -316,6 +316,7 @@ export function createProtectedHandler(
         resolveSiteKey: siteKeyResolver(config),
         resolveAgentKey: config.stores.agentKeys,
         revocation: config.stores.grants,
+        grantScope: config.stores.grants,
         nonceStore: config.stores.nonces,
         idempotency: config.stores.idempotency,
         ledger: config.stores.ledger,

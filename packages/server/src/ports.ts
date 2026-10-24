@@ -1,6 +1,7 @@
 import type {
   AuditEvent,
   GrantRequestBody,
+  GrantScopeChecker,
   IdempotencyRecord,
   IdempotencyStore,
   Jwk,
@@ -54,6 +55,12 @@ export interface GrantRequestStore {
   insert(record: GrantRequestRecord): Promise<void>;
   get(requestId: string): Promise<GrantRequestRecord | undefined>;
   /**
+   * Count requests an agent key created since `since` (epoch seconds).
+   * Backs intake rate limiting; `statuses` optionally restricts which
+   * request states count (e.g. only pending ones).
+   */
+  countByAgent(agentJkt: string, since: number, statuses?: GrantRequestStatus[]): Promise<number>;
+  /**
    * Atomically moves a request out of `from` status while applying `patch`.
    * Returns the updated record, or undefined when the stored status does not
    * equal `from`. Equivalent to `UPDATE ... WHERE request_id = ? AND status = ?`.
@@ -86,12 +93,21 @@ export interface IssuedGrantRecord {
   subject?: string;
   requestId: string;
   status: IssuedGrantStatus;
+  /** The permission set signed into the grant at issuance. */
+  permissions: string[];
+  /**
+   * The site's current effective permissions after post-issuance scope
+   * changes. Undefined means unmodified: the issued set applies.
+   */
+  effectivePermissions?: string[];
+  /** Current effective resources after post-issuance scope changes. */
+  effectiveResources?: string[];
   revokedAt?: number;
   revocationReason?: string;
   revocationActor?: string;
 }
 
-export interface GrantRegistry extends RevocationChecker {
+export interface GrantRegistry extends RevocationChecker, GrantScopeChecker {
   insert(record: IssuedGrantRecord): Promise<void>;
   get(jti: string): Promise<IssuedGrantRecord | undefined>;
   /**
@@ -102,6 +118,16 @@ export interface GrantRegistry extends RevocationChecker {
   revoke(
     jti: string,
     input: { reason: string; actor: string; at: number },
+  ): Promise<IssuedGrantRecord | undefined>;
+  /**
+   * Atomically replaces the grant's effective scope. The lifecycle layer
+   * validates the new set against the site vocabulary before calling;
+   * enforcement treats the stored scope as authoritative. Returns
+   * undefined when the grant is absent or revoked.
+   */
+  updateScope(
+    jti: string,
+    input: { permissions: string[]; resources?: string[]; actor: string; at: number },
   ): Promise<IssuedGrantRecord | undefined>;
 }
 

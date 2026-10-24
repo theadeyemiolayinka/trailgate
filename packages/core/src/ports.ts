@@ -36,6 +36,22 @@ export interface RevocationChecker {
   isRevoked(grantId: string): Promise<boolean>;
 }
 
+/**
+ * The site's current effective scope for a grant, consulted at every
+ * request so post-issuance scope changes take effect without reissuing a
+ * JWT. Only the site can write this state; an agent can never change its
+ * own scope. When present, `permissions` replaces the signed set (the
+ * lifecycle layer keeps it inside the site's advertised vocabulary).
+ */
+export interface GrantScope {
+  permissions?: readonly string[];
+  resources?: readonly string[];
+}
+
+export interface GrantScopeChecker {
+  currentScope(grantId: string): Promise<GrantScope | undefined>;
+}
+
 export interface Ledger {
   consumedMinorUnits(grantId: string, currency: string): Promise<number>;
   reservedMinorUnits(grantId: string, currency: string): Promise<number>;

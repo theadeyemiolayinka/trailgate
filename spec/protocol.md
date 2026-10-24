@@ -229,6 +229,8 @@ Examples of policy shapes deliberately not in 0.1: disjunctive constraints ("eit
 
 Response `201`: `{ "request_id": "<id>", "consent_url": "<same-origin URL>", "expires_at": <int> }`. The request expires (`expires_at`, maximum 900 seconds after creation) if consent is not completed.
 
+A site SHOULD rate-limit this endpoint per `agent_key` thumbprint: a bounded number of open (pending or approved) requests and a bounded creation rate per rolling minute. Excess is denied `tg.request.rate_limited` (HTTP 429). Without this, an agent that discovers the endpoint can mint unbounded consent requests.
+
 ### 10.3 Consent
 
 - `consent_url` is on the site origin. The user authenticates through the site's existing flow. TrailGate defines no authentication method.
@@ -333,6 +335,7 @@ When a monetary request exceeds an `approval_threshold` constraint, the request 
   - **Agent self-revocation**: the agent sends the revocation call as a section 11 protected request presenting the grant whose `jti` equals the body's `grant_id`. A bound grant may always revoke itself; no additional permission is required. A grant that fails verification cannot revoke anything.
   - **Site-initiated**: the site's own authenticated surfaces (user settings, admin tooling, risk systems) revoke through host-side calls; authentication is site-defined and outside this specification.
   A site that implements neither MUST deny every call with `tg.authorization.denied`. Unknown `grant_id` is `tg.grant.unknown`; an already-revoked grant returns the same `tg.grant.unknown`.
+- Post-issuance scope control: only the site may change what a grant can do. A site MAY record an effective permission set (and resource set) for a grant that replaces the signed scope at enforcement, letting the user or site operators add or remove permissions without a fresh consent flow. The effective set MUST stay inside the site's advertised permission vocabulary; an empty set is refused because removing every permission is a revocation, not a scope change. Enforcement reads the stored scope on every request, so changes take effect immediately. Agents can never modify their own scope — only site-side authenticated surfaces (or a fresh consent flow) can. The signed grant remains evidence of the originally consented scope and the key binding.
 - Key rotation: site signing keys rotate by publishing new keys in `signing_keys` while keeping the old `kid` valid for verification of outstanding grants until they expire. Agent keys rotate by issuing a new grant bound to the new `jkt`; a grant is never re-bound mid-flight. `grant_status` exposes whether a key rotation invalidated outstanding grants.
 
 ## 14. Receipts

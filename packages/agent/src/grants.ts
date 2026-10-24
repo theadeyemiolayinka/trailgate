@@ -199,6 +199,13 @@ export interface GrantStatusResponse {
   status: GrantRequestStatus;
   issued_at?: number;
   expires_at?: number;
+  /**
+   * The site's current effective scope for the grant (grant_id lookups).
+   * Reflects post-issuance scope changes the user or site made; advisory
+   * like the rest of status — enforcement remains authoritative.
+   */
+  permissions?: string[];
+  resources?: string[];
 }
 
 /**
@@ -243,6 +250,15 @@ export async function fetchGrantStatus(
     if (value !== undefined) {
       if (typeof value !== 'number' || !Number.isInteger(value)) {
         throw new TrailGateError(Codes.REQUEST_MALFORMED, `${name} is not an integer`);
+      }
+      out[name] = value;
+    }
+  }
+  for (const name of ['permissions', 'resources'] as const) {
+    const value = record[name];
+    if (value !== undefined) {
+      if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+        throw new TrailGateError(Codes.REQUEST_MALFORMED, `${name} is not a string array`);
       }
       out[name] = value;
     }

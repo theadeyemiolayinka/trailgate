@@ -88,6 +88,7 @@ test('grant registry: insert, revoke is atomic and idempotent', async () => {
     requestId: 'req_1',
     status: 'active',
     subject: 'usr_demo',
+    permissions: ['tg.a.b'],
   });
   assert.equal(await registry.isRevoked('grt_1'), false);
   const revoked = await registry.revoke('grt_1', {

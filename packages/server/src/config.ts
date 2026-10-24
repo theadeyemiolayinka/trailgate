@@ -158,6 +158,17 @@ export interface TrailGateServerOptions {
   maxBodyBytes?: number;
   /** Maximum total header name+value bytes. Default 16 KiB. */
   maxHeadersBytes?: number;
+  /**
+   * Maximum grant requests a single agent key may have open at once;
+   * excess is denied with `tg.request.rate_limited`. Default 5.
+   */
+  maxPendingRequestsPerAgent?: number;
+  /**
+   * Maximum grant requests a single agent key may create per rolling
+   * 60-second window; excess is denied with `tg.request.rate_limited`.
+   * Default 10.
+   */
+  maxGrantRequestsPerMinute?: number;
 }
 
 export interface ResolvedServerConfig {
@@ -203,6 +214,8 @@ export interface ResolvedServerConfig {
   requestApprovalTtlSeconds: number;
   maxBodyBytes: number;
   maxHeadersBytes: number;
+  maxPendingRequestsPerAgent: number;
+  maxGrantRequestsPerMinute: number;
   supportedProtocolVersions: readonly string[];
 }
 
@@ -309,6 +322,8 @@ export function resolveConfig(options: TrailGateServerOptions): ResolvedServerCo
       options.requestApprovalTtlSeconds ?? DEFAULT_REQUEST_APPROVAL_TTL_SECONDS,
     maxBodyBytes: options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
     maxHeadersBytes: options.maxHeadersBytes ?? DEFAULT_MAX_HEADERS_BYTES,
+    maxPendingRequestsPerAgent: options.maxPendingRequestsPerAgent ?? 5,
+    maxGrantRequestsPerMinute: options.maxGrantRequestsPerMinute ?? 10,
     supportedProtocolVersions: protocolVersions,
     ...(options.policy !== undefined ? { policy: options.policy } : {}),
     ...(options.resourceOwners !== undefined ? { resourceOwners: options.resourceOwners } : {}),

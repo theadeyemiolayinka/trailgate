@@ -14,8 +14,9 @@ import {
   redeemGrant,
   revokeGrant,
   submitGrantRequest,
+  updateGrantScope,
 } from './lifecycle.ts';
-import type { RequestApprovalRecord } from './ports.ts';
+import type { IssuedGrantRecord, RequestApprovalRecord } from './ports.ts';
 import type { SiteSigningKey, SiteSigningKeyInput } from './signing.ts';
 import { siteSigningKey } from './signing.ts';
 import type {
@@ -70,6 +71,16 @@ export interface TrailGateServer {
   handleRevocation(req: HostRequest): Promise<HostResponse>;
   /** Host-initiated revocation from authenticated site surfaces (spec section 13). */
   revokeGrant(jti: string, input: { reason: string; actor: string }): Promise<void>;
+  /**
+   * Host-initiated post-issuance scope change (spec section 13): replaces
+   * the grant's effective permissions (and optionally resources) with any
+   * set inside the site's advertised vocabulary. Takes effect at the next
+   * enforcement pass without reissuing a JWT.
+   */
+  updateGrantScope(
+    jti: string,
+    input: { permissions: string[]; resources?: string[]; actor: string },
+  ): Promise<IssuedGrantRecord>;
   /**
    * Records the user's decision on a per-request `approval_threshold`
    * approval (spec section 12.4). Only the grant subject may decide.
@@ -161,6 +172,7 @@ export function createTrailGateServer(options: TrailGateServerOptions): TrailGat
     handleRevocation: (req) =>
       handleRevocationRequest(req, config).catch((err) => errorResponse(err)),
     revokeGrant: (jti, input) => revokeGrant(jti, input, config),
+    updateGrantScope: (jti, input) => updateGrantScope(jti, input, config),
     decideRequestApproval: (approvalId, decision, siteUserId) =>
       decideRequestApproval(approvalId, decision, siteUserId, config),
     rotateSigningKey: async (input) => {

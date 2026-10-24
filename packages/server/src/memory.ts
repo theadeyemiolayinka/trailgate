@@ -32,6 +32,19 @@ export function createInMemoryGrantRequestStore(): GrantRequestStore {
       records.set(record.requestId, record);
     },
     get: async (requestId) => records.get(requestId),
+    countByAgent: async (agentJkt, since, statuses) => {
+      let count = 0;
+      for (const record of records.values()) {
+        if (
+          record.agentJkt === agentJkt &&
+          record.createdAt >= since &&
+          (statuses === undefined || statuses.includes(record.status))
+        ) {
+          count += 1;
+        }
+      }
+      return count;
+    },
     transition: async (requestId, from, patch) => {
       const record = records.get(requestId);
       if (record === undefined || record.status !== from) {
@@ -76,6 +89,31 @@ export function createInMemoryGrantRegistry(): GrantRegistry {
         revokedAt: input.at,
         revocationReason: input.reason,
         revocationActor: input.actor,
+      };
+      grants.set(jti, next);
+      return next;
+    },
+    currentScope: async (jti) => {
+      const record = grants.get(jti);
+      if (record === undefined || record.status === 'revoked') {
+        return undefined;
+      }
+      return {
+        permissions: record.effectivePermissions ?? record.permissions,
+        ...(record.effectiveResources !== undefined
+          ? { resources: record.effectiveResources }
+          : {}),
+      };
+    },
+    updateScope: async (jti, input) => {
+      const record = grants.get(jti);
+      if (record === undefined || record.status === 'revoked') {
+        return undefined;
+      }
+      const next: IssuedGrantRecord = {
+        ...record,
+        effectivePermissions: input.permissions,
+        ...(input.resources !== undefined ? { effectiveResources: input.resources } : {}),
       };
       grants.set(jti, next);
       return next;

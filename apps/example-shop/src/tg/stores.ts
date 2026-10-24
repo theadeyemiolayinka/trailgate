@@ -120,6 +120,19 @@ export function createGrantRequestStore(db: Db): GrantRequestStore {
         .get(requestId) as unknown as GrantRequestRow | undefined;
       return row === undefined ? undefined : toGrantRequestRecord(row);
     },
+    countByAgent: async (agentJkt, since, statuses) => {
+      const filter =
+        statuses === undefined || statuses.length === 0
+          ? ''
+          : ` AND status IN (${statuses.map(() => '?').join(', ')})`;
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM tg_grant_requests
+           WHERE agent_jkt = ? AND created_at >= ?${filter}`,
+        )
+        .get(agentJkt, since, ...(statuses ?? [])) as { n: number };
+      return row.n;
+    },
     transition: async (requestId, from, patch) => {
       const sets: string[] = [];
       const values: unknown[] = [];
@@ -179,6 +192,9 @@ interface GrantRow {
   subject: string | null;
   request_id: string;
   status: 'active' | 'revoked';
+  permissions: string;
+  effective_permissions: string | null;
+  effective_resources: string | null;
   revoked_at: number | null;
   revocation_reason: string | null;
   revocation_actor: string | null;
@@ -192,8 +208,15 @@ function toGrantRecord(row: GrantRow): IssuedGrantRecord {
     agentJkt: row.agent_jkt,
     requestId: row.request_id,
     status: row.status,
+    permissions: JSON.parse(row.permissions) as string[],
   };
   if (row.subject !== null) record.subject = row.subject;
+  if (row.effective_permissions !== null) {
+    record.effectivePermissions = JSON.parse(row.effective_permissions) as string[];
+  }
+  if (row.effective_resources !== null) {
+    record.effectiveResources = JSON.parse(row.effective_resources) as string[];
+  }
   if (row.revoked_at !== null) record.revokedAt = row.revoked_at;
   if (row.revocation_reason !== null) record.revocationReason = row.revocation_reason;
   if (row.revocation_actor !== null) record.revocationActor = row.revocation_actor;
@@ -206,8 +229,9 @@ export function createGrantRegistry(db: Db): GrantRegistry {
       db.prepare(
         `INSERT INTO tg_grants
          (jti, issued_at, expires_at, agent_jkt, subject, request_id, status,
+          permissions, effective_permissions,
           revoked_at, revocation_reason, revocation_actor)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         record.jti,
         record.issuedAt,
@@ -216,6 +240,10 @@ export function createGrantRegistry(db: Db): GrantRegistry {
         record.subject ?? null,
         record.requestId,
         record.status,
+        JSON.stringify(record.permissions),
+        record.effectivePermissions !== undefined
+          ? JSON.stringify(record.effectivePermissions)
+          : null,
         record.revokedAt ?? null,
         record.revocationReason ?? null,
         record.revocationActor ?? null,
@@ -241,6 +269,50 @@ export function createGrantRegistry(db: Db): GrantRegistry {
            WHERE jti = ? AND status = 'active'`,
         )
         .run(input.at, input.reason, input.actor, jti);
+      if (result.changes === 0) {
+        return undefined;
+      }
+      const row = db
+        .prepare('SELECT * FROM tg_grants WHERE jti = ?')
+        .get(jti) as unknown as GrantRow;
+      return toGrantRecord(row);
+    },
+    currentScope: async (jti) => {
+      const row = db
+        .prepare(
+          'SELECT permissions, effective_permissions, effective_resources, status FROM tg_grants WHERE jti = ?',
+        )
+        .get(jti) as
+        | {
+            permissions: string;
+            effective_permissions: string | null;
+            effective_resources: string | null;
+            status: string;
+          }
+        | undefined;
+      if (row === undefined || row.status === 'revoked') {
+        return undefined;
+      }
+      const scope: { permissions: string[]; resources?: string[] } = {
+        permissions: JSON.parse(row.effective_permissions ?? row.permissions) as string[],
+      };
+      if (row.effective_resources !== null) {
+        scope.resources = JSON.parse(row.effective_resources) as string[];
+      }
+      return scope;
+    },
+    updateScope: async (jti, input) => {
+      const result = db
+        .prepare(
+          `UPDATE tg_grants
+           SET effective_permissions = ?, effective_resources = COALESCE(?, effective_resources)
+           WHERE jti = ? AND status = 'active'`,
+        )
+        .run(
+          JSON.stringify(input.permissions),
+          input.resources !== undefined ? JSON.stringify(input.resources) : null,
+          jti,
+        );
       if (result.changes === 0) {
         return undefined;
       }

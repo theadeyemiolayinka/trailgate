@@ -7,6 +7,7 @@ import { signatureAlgorithmFor } from './jwk.ts';
 import { assertPermissionGranted } from './permissions.ts';
 import type {
   Clock,
+  GrantScopeChecker,
   IdempotencyStore,
   KeyResolver,
   Ledger,
@@ -57,6 +58,14 @@ export interface RequestVerificationDeps {
   toleranceSeconds?: number;
   supportedProtocolVersions?: readonly string[];
   permissionVocabulary?: readonly string[];
+  /**
+   * Optional post-issuance scope hook. When present, it is consulted at
+   * every request for the site's current effective scope for a grant, so
+   * the site can tighten a grant after issuance (spec section 13). The
+   * result is intersected with the signed grant: it can only narrow, never
+   * widen what the grant JWT carries.
+   */
+  grantScope?: GrantScopeChecker;
   knownCriticalFields?: readonly string[];
   requiredPermission?: string;
   requestAmount?: Money;
@@ -184,6 +193,24 @@ export async function verifyProtectedRequest(
     throw new TrailGateError(Codes.GRANT_REVOKED, 'grant is revoked');
   }
 
+  // Post-issuance scope: the site's stored effective scope replaces the
+  // signed set when present. Only the site can write it; the JWT remains
+  // evidence of the original consent and the key binding.
+  let effectivePermissions = grant.tg.permissions;
+  let effectiveResources = grant.tg.resources;
+  if (deps.grantScope !== undefined) {
+    const scope = await callPort(
+      () => deps.grantScope?.currentScope(grant.jti) ?? Promise.resolve(undefined),
+      'grant scope state is unavailable',
+    );
+    if (scope?.permissions !== undefined) {
+      effectivePermissions = [...scope.permissions];
+    }
+    if (scope?.resources !== undefined) {
+      effectiveResources = [...scope.resources];
+    }
+  }
+
   if (signatureInput.params.keyid !== grant.cnf.jkt) {
     throw new TrailGateError(
       Codes.REQUEST_KEY_MISMATCH,
@@ -247,7 +274,7 @@ export async function verifyProtectedRequest(
   }
 
   if (deps.requiredPermission !== undefined) {
-    assertPermissionGranted(grant.tg.permissions, deps.requiredPermission);
+    assertPermissionGranted(effectivePermissions, deps.requiredPermission);
   }
 
   const touchedResource = deps.resolveTouchedResource?.(grant) ?? deps.touchedResource;
@@ -256,7 +283,7 @@ export async function verifyProtectedRequest(
       throw new TrailGateError(Codes.INTERNAL_UNAVAILABLE, 'resource ownership cannot be checked');
     }
     await assertResourceAllowed(
-      grant.tg.resources,
+      effectiveResources,
       touchedResource,
       deps.resourceOwners,
       grant.sub,
@@ -277,8 +304,8 @@ export async function verifyProtectedRequest(
 
   const context: VerifiedRequestContext = {
     grantId: grant.jti,
-    permissions: grant.tg.permissions,
-    resources: grant.tg.resources,
+    permissions: effectivePermissions,
+    resources: effectiveResources,
     method: req.method,
     url: req.url,
     requestDigest,

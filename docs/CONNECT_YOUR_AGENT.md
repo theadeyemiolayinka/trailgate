@@ -91,9 +91,13 @@ over; approval can only narrow the request, never widen it. An approve
 with nothing checked is refused.
 
 **The agent does not escalate on its own.** If an action is denied for
-missing access, it reports what it lacks and stops; a consent URL only
-appears after you explicitly ask it to request access. Denied? You decide
-whether to grant, not the agent. Then tell it:
+missing access, it reports what it lacks in plain words and stops; a
+consent URL only appears after you explicitly ask it to request access.
+
+**You stay in control after granting, too.** Account -> Agent connections
+lists every grant; open one to untick individual permissions ("Change
+permissions") or revoke outright. Narrowing applies to the agent's very
+next request and can never grant more than it already had. Then tell it:
 
 > "Redeem that request, then fetch my cart."
 

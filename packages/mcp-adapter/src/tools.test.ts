@@ -135,11 +135,12 @@ describe('createTrailGateTools', () => {
     });
     assert.equal(result.isError, undefined);
     const parsed = JSON.parse(serialized(result)) as {
-      actions: { id: string; covered: boolean; missing?: string[] }[];
+      actions: { id: string; name: string; covered: boolean; permission: string }[];
     };
     assert.equal(parsed.actions[0]?.id, 'orders.create');
+    assert.equal(parsed.actions[0]?.name, 'place an order');
     assert.equal(parsed.actions[0]?.covered, false);
-    assert.deepEqual(parsed.actions[0]?.missing, ['tg.order.create']);
+    assert.equal(parsed.actions[0]?.permission, 'tg.order.create');
     assert.ok(!serialized(result).includes('SECRET-GRANT-TOKEN'));
   });
 

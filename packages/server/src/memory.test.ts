@@ -242,6 +242,7 @@ describe('in-memory grant registry', () => {
       agentJkt: 'jkt',
       requestId: 'req_1',
       status: 'active',
+      permissions: ['tg.a.b'],
     });
     assert.equal(await registry.isRevoked('grt_1'), false);
     const revoked = await registry.revoke('grt_1', {

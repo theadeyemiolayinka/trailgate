@@ -236,6 +236,35 @@ describe('verifyProtectedRequest', () => {
     );
   });
 
+  it('post-issuance scope narrows permissions without reissuing the grant', async () => {
+    const { req } = await makeRequest();
+    const scoped = deps({
+      grantScope: { currentScope: async () => ({ permissions: [] }) },
+    });
+    await expectCode(Codes.REQUEST_PERMISSION_DENIED, () =>
+      verifyProtectedRequest(req, {
+        ...scoped,
+        requiredPermission: 'tg.order.create',
+      }),
+    );
+  });
+
+  it('a widened site-side scope takes effect on the next request', async () => {
+    const { req } = await makeRequest();
+    // The grant only carries tg.order.create; the site later allows
+    // tg.wallet.charge too. The stored scope is authoritative.
+    const result = await verifyProtectedRequest(
+      req,
+      deps({
+        grantScope: {
+          currentScope: async () => ({ permissions: ['tg.order.create', 'tg.wallet.charge'] }),
+        },
+        requiredPermission: 'tg.wallet.charge',
+      }),
+    );
+    assert.deepEqual(result.context.permissions, ['tg.order.create', 'tg.wallet.charge']);
+  });
+
   it('denies resources outside the grant scope', async () => {
     const { req } = await makeRequest();
     await expectCode(Codes.REQUEST_RESOURCE_DENIED, () =>

@@ -192,6 +192,38 @@ async function createOrderFromCart(client: AgentClient, sku: string, qty: number
   return (JSON.parse(text(create)) as { id: string }).id;
 }
 
+test('post-issuance scope: the site can remove and re-add permissions without re-consent', async () => {
+  const app = makeApp();
+  const { client, grant } = await approveAgent(app, { ...AGENT_SCOPE });
+
+  const before = await client.fetchProtected(ISSUER, { method: 'GET', target: '/api/cart' });
+  assert.equal(before.status, 200, `cart read before narrowing: ${text(before)}`);
+
+  await app.tg.tg.updateGrantScope(grant.jti, {
+    permissions: AGENT_SCOPE.permissions.filter((p) => p !== 'tg.cart.read'),
+    actor: 'user:usr_demo',
+  });
+
+  const denied = await client.fetchProtected(ISSUER, { method: 'GET', target: '/api/cart' });
+  assert.equal(denied.status, 403);
+  assert.equal(
+    (JSON.parse(text(denied)) as { error: { code: string } }).error.code,
+    Codes.REQUEST_PERMISSION_DENIED,
+  );
+
+  // Permissions the user kept still work, and the site can hand cart
+  // access back later without a fresh consent flow.
+  const wallet = await client.fetchProtected(ISSUER, { method: 'GET', target: '/api/wallet' });
+  assert.equal(wallet.status, 200, `wallet read after narrowing: ${text(wallet)}`);
+
+  await app.tg.tg.updateGrantScope(grant.jti, {
+    permissions: [...AGENT_SCOPE.permissions],
+    actor: 'user:usr_demo',
+  });
+  const restored = await client.fetchProtected(ISSUER, { method: 'GET', target: '/api/cart' });
+  assert.equal(restored.status, 200, `cart read after re-adding: ${text(restored)}`);
+});
+
 test('grant-request intake: unknown permission and unsupported constraint types are rejected', async () => {
   const app = makeApp();
   const client = createAgentClient({ transport: inProcessTransport(app) });

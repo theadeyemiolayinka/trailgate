@@ -272,6 +272,25 @@ describe('consent decisions', () => {
     );
   });
 
+  it('rate limits an agent key that floods grant requests', async () => {
+    const server = makeServer({ maxPendingRequestsPerAgent: 2, maxGrantRequestsPerMinute: 10 });
+    await server.handleGrantRequest(post(`${ISSUER}/tg/grant-request`, grantRequestBody()));
+    await server.handleGrantRequest(post(`${ISSUER}/tg/grant-request`, grantRequestBody()));
+    const third = await server.handleGrantRequest(
+      post(`${ISSUER}/tg/grant-request`, grantRequestBody()),
+    );
+    assert.equal(third.status, 429);
+    assert.equal(
+      (third.body as { error: { code: string } }).error.code,
+      Codes.REQUEST_RATE_LIMITED,
+    );
+    // Deciding the pending requests frees the agent's quota.
+    const page = await server.handleGrantRequest(
+      post(`${ISSUER}/tg/grant-request`, grantRequestBody({ code_challenge: pkce().challenge })),
+    );
+    assert.equal(page.status, 429);
+  });
+
   it('refines scope through the configured hook and enforces subset rules', async () => {
     const server = makeServer({
       refineScope: (requested) => ({
@@ -426,5 +445,73 @@ describe('status and revocation', () => {
     await server.revokeGrant(jti, { reason: 'user requested', actor: 'user_1' });
     status = await server.handleStatus(get(`${ISSUER}/tg/grant-status?grant_id=${jti}`));
     assert.equal((status.body as { status: string }).status, 'revoked');
+  });
+});
+
+describe('post-issuance scope changes', () => {
+  async function issuedJti(
+    server: ReturnType<typeof makeServer>,
+    permissions = ['tg.order.create', 'tg.cart.read'],
+  ): Promise<string> {
+    const { verifier, challenge } = pkce();
+    const res = await server.handleGrantRequest(
+      post(
+        `${ISSUER}/tg/grant-request`,
+        grantRequestBody({ code_challenge: challenge, permissions }),
+      ),
+    );
+    const requestId = (res.body as { request_id: string }).request_id;
+    await server.decideConsent(requestId, 'approve', 'user_1');
+    const redeemed = await server.handleRedemption(
+      post(`${ISSUER}/tg/grant-redemption`, { request_id: requestId, code_verifier: verifier }),
+    );
+    const token = (redeemed.body as { grant: string }).grant;
+    return JSON.parse(Buffer.from(token.split('.')[1] as string, 'base64url').toString('utf8'))
+      .jti as string;
+  }
+
+  it('narrows the effective set without touching the signed grant', async () => {
+    const server = makeServer();
+    const jti = await issuedJti(server);
+    const narrowed = await server.updateGrantScope(jti, {
+      permissions: ['tg.cart.read'],
+      actor: 'user:user_1',
+    });
+    assert.deepEqual(narrowed.effectivePermissions, ['tg.cart.read']);
+    // The issued set is unchanged; effectivePermissions is the live scope.
+    assert.deepEqual(narrowed.permissions, ['tg.order.create', 'tg.cart.read']);
+  });
+
+  it('lets the site add a permission from its own vocabulary later', async () => {
+    const server = makeServer();
+    const jti = await issuedJti(server, ['tg.cart.read']);
+    const grown = await server.updateGrantScope(jti, {
+      permissions: ['tg.cart.read', 'tg.wallet.charge'],
+      actor: 'user:user_1',
+    });
+    assert.deepEqual(grown.effectivePermissions, ['tg.cart.read', 'tg.wallet.charge']);
+    // The signed grant still records what consent originally approved.
+    assert.deepEqual(grown.permissions, ['tg.cart.read']);
+  });
+
+  it('refuses scope outside the vocabulary, an empty set, or a revoked grant', async () => {
+    const server = makeServer();
+    const jti = await issuedJti(server);
+    await assertCode(
+      server.updateGrantScope(jti, {
+        permissions: ['tg.cart.read', 'tg.admin.all'],
+        actor: 'user:user_1',
+      }),
+      Codes.REQUEST_MALFORMED,
+    );
+    await assertCode(
+      server.updateGrantScope(jti, { permissions: [], actor: 'user:user_1' }),
+      Codes.REQUEST_MALFORMED,
+    );
+    await server.revokeGrant(jti, { reason: 'test', actor: 'user_1' });
+    await assertCode(
+      server.updateGrantScope(jti, { permissions: ['tg.cart.read'], actor: 'user:user_1' }),
+      Codes.GRANT_UNKNOWN,
+    );
   });
 });

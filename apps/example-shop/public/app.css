@@ -1419,6 +1419,19 @@ img {
 .scope-choice + .scope-choice {
   border-top: 1px solid var(--line);
 }
+.perm-editor {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+.perm-editor summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.perm-editor form {
+  margin-top: var(--space-3);
+}
 .consent-actions {
   display: flex;
   gap: var(--space-3);

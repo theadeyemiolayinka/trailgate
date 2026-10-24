@@ -42,6 +42,7 @@ import { html, redirect } from './http/responses.ts';
 import type { AppRequest, AppResponse } from './http/router.ts';
 import { Router } from './http/router.ts';
 import { createShopTrailGate, type ShopTrailGate } from './tg/server.ts';
+import { bindShopSelectors } from './tg/vocabulary.ts';
 import { page } from './ui/layout.ts';
 import { renderAddresses, renderProfile } from './ui/pages/account.ts';
 import { type ActivityRow, renderActivity } from './ui/pages/activity.ts';
@@ -741,6 +742,8 @@ function buildRoutes(ctx: Ctx): Router {
         agent_jkt: string;
         status: 'active' | 'revoked';
         request_id: string;
+        permissions: string;
+        effective_permissions: string | null;
         revoked_at: number | null;
         revocation_reason: string | null;
         revocation_actor: string | null;
@@ -748,24 +751,25 @@ function buildRoutes(ctx: Ctx): Router {
       const grants: IssuedGrantView[] = grantRows.map((row) => {
         const reqRow = db
           .prepare(
-            'SELECT effective_permissions, effective_resources, effective_constraints FROM tg_grant_requests WHERE request_id = ?',
+            'SELECT effective_resources, effective_constraints FROM tg_grant_requests WHERE request_id = ?',
           )
           .get(row.request_id) as
           | {
-              effective_permissions: string | null;
               effective_resources: string | null;
               effective_constraints: string | null;
             }
           | undefined;
         const jsonField = (value: string | null | undefined): unknown[] =>
           value === null || value === undefined ? [] : (JSON.parse(value) as unknown[]);
+        const issuedPermissions = jsonField(row.permissions) as string[];
         return {
           jti: row.jti,
           agentJkt: row.agent_jkt,
           issuedAt: row.issued_at,
           expiresAt: row.expires_at,
           status: row.status,
-          permissions: jsonField(reqRow?.effective_permissions) as string[],
+          issuedPermissions,
+          permissions: jsonField(row.effective_permissions ?? row.permissions) as string[],
           resources: jsonField(reqRow?.effective_resources) as string[],
           constraints: jsonField(reqRow?.effective_constraints) as IssuedGrantView['constraints'],
           ...(row.revoked_at !== null ? { revokedAt: row.revoked_at } : {}),
@@ -810,6 +814,61 @@ function buildRoutes(ctx: Ctx): Router {
     }),
   );
 
+  const SCOPE_RESOURCE_TEMPLATE: Record<string, string> = {
+    'tg.cart.read': 'cart:{user}',
+    'tg.cart.write': 'cart:{user}',
+    'tg.wallet.read': 'wallet:{user}',
+    'tg.wallet.charge': 'wallet:{user}',
+  };
+  // Post-issuance scope control: the user ticks what the agent may do on
+  // the connection page and the site applies it in place. Only the site
+  // can change a grant's scope; the set is validated against the site's
+  // advertised vocabulary and resource selectors are derived from the
+  // subject's own resources through the same consent-time binding.
+  router.post(
+    '/account/connections/:jti/scope',
+    authed(async (req, user) => {
+      const form = parseForm(req);
+      requireCsrf(req, form);
+      const formValues = parseFormValues(req);
+      const jti = req.params.jti as string;
+      const grant = db.prepare('SELECT subject FROM tg_grants WHERE jti = ?').get(jti) as
+        | { subject: string | null }
+        | undefined;
+      if (grant?.subject !== user.id) {
+        return render(ctx, req, { title: 'Not found', status: 404, body: renderNotFound() });
+      }
+      const selected = formValues.perm ?? [];
+      if (selected.length === 0) {
+        return render(ctx, req, {
+          title: 'Nothing selected',
+          status: 400,
+          body: renderError('Keep at least one permission, or revoke the connection instead.'),
+        });
+      }
+      // Permissions that touch subject-owned resources get their selectors
+      // from the same {user} binding used at consent time.
+      const templates = selected
+        .map((perm) => SCOPE_RESOURCE_TEMPLATE[perm])
+        .filter((t): t is string => t !== undefined);
+      const resources = templates.length > 0 ? bindShopSelectors(templates, user.id) : undefined;
+      try {
+        await ctx.tg.tg.updateGrantScope(jti, {
+          permissions: selected,
+          ...(resources !== undefined ? { resources } : {}),
+          actor: `user:${user.id}`,
+        });
+      } catch (err) {
+        return render(ctx, req, {
+          title: 'Could not update permissions',
+          status: 400,
+          body: renderError(err instanceof Error ? err.message : 'The change was refused.'),
+        });
+      }
+      return redirect(`/account/connections/${jti}`);
+    }),
+  );
+
   const grantViewOf = (row: {
     jti: string;
     agent_jkt: string;
@@ -817,30 +876,33 @@ function buildRoutes(ctx: Ctx): Router {
     expires_at: number;
     status: 'active' | 'revoked';
     request_id: string;
+    permissions: string;
+    effective_permissions: string | null;
     revoked_at: number | null;
     revocation_reason: string | null;
     revocation_actor: string | null;
   }): IssuedGrantView => {
     const reqRow = db
       .prepare(
-        'SELECT effective_permissions, effective_resources, effective_constraints FROM tg_grant_requests WHERE request_id = ?',
+        'SELECT effective_resources, effective_constraints FROM tg_grant_requests WHERE request_id = ?',
       )
       .get(row.request_id) as
       | {
-          effective_permissions: string | null;
           effective_resources: string | null;
           effective_constraints: string | null;
         }
       | undefined;
     const jsonField = (value: string | null | undefined): unknown[] =>
       value === null || value === undefined ? [] : (JSON.parse(value) as unknown[]);
+    const issuedPermissions = jsonField(row.permissions) as string[];
     return {
       jti: row.jti,
       agentJkt: row.agent_jkt,
       issuedAt: row.issued_at,
       expiresAt: row.expires_at,
       status: row.status,
-      permissions: jsonField(reqRow?.effective_permissions) as string[],
+      issuedPermissions,
+      permissions: jsonField(row.effective_permissions ?? row.permissions) as string[],
       resources: jsonField(reqRow?.effective_resources) as string[],
       constraints: jsonField(reqRow?.effective_constraints) as IssuedGrantView['constraints'],
       ...(row.revoked_at !== null ? { revokedAt: row.revoked_at } : {}),
@@ -862,6 +924,8 @@ function buildRoutes(ctx: Ctx): Router {
             status: 'active' | 'revoked';
             request_id: string;
             subject: string | null;
+            permissions: string;
+            effective_permissions: string | null;
             revoked_at: number | null;
             revocation_reason: string | null;
             revocation_actor: string | null;

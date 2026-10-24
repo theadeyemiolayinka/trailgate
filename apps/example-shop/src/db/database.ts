@@ -268,6 +268,18 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX idx_tg_approvals_op ON tg_request_approvals(grant_id, operation_digest, state, expires_at);
     `,
   },
+  {
+    id: 6,
+    sql: `
+      -- permissions: the set signed into the grant at issuance.
+      -- effective_permissions: the site's current set after post-issuance
+      -- narrowing; NULL means unmodified.
+      ALTER TABLE tg_grants ADD COLUMN permissions TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE tg_grants ADD COLUMN effective_permissions TEXT;
+      ALTER TABLE tg_grants ADD COLUMN effective_resources TEXT;
+      CREATE INDEX idx_tg_grant_requests_agent ON tg_grant_requests(agent_jkt, created_at);
+    `,
+  },
 ];
 
 export function migrate(db: Db): void {

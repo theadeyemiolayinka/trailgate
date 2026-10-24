@@ -140,6 +140,30 @@ describe('checkAccess', () => {
     assert.equal(result.status, 'ready');
   });
 
+  it('adopts scope the site added after granting when confirmFresh is set', async () => {
+    const g = await grant();
+    // The stored grant covers tg.order.create only; the site now reports
+    // wallet access too, so the local check becomes ready.
+    const result = await checkAccessAsync(
+      site(),
+      [g],
+      { confirmFresh: true, permissions: ['tg.order.create', 'tg.wallet.charge'] },
+      {
+        ...deps,
+        statusOf: async () => ({
+          status: 'active',
+          permissions: ['tg.order.create', 'tg.wallet.charge'],
+        }),
+      },
+    );
+    assert.equal(result.status, 'ready');
+    // Without the fresh lookup the same criteria stays insufficient.
+    const stale = checkAccess(site(), [g], {
+      permissions: ['tg.order.create', 'tg.wallet.charge'],
+    });
+    assert.equal(stale.status, 'insufficient_permission');
+  });
+
   it('does not downgrade ready when the status lookup fails', async () => {
     const g = await grant();
     const result = await checkAccessAsync(

@@ -81,6 +81,13 @@ export interface GrantStatusResponse {
   status: GrantStatus;
   issued_at?: number;
   expires_at?: number;
+  /**
+   * The site's current effective scope for the grant (grant_id lookups
+   * only). Reflects post-issuance scope changes the site made; advisory
+   * like the rest of status, enforcement is authoritative.
+   */
+  permissions?: string[];
+  resources?: string[];
 }
 
 /**
