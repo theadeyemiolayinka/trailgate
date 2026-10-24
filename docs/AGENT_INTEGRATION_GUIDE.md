@@ -68,9 +68,10 @@ Tools: `trailgate.discover`, `trailgate.actions`, `trailgate.access`,
 `trailgate.fetch`, `trailgate.grants`, `trailgate.revoke`.
 
 Consent cannot be skipped: `trailgate.request` returns a `consentUrl` the
-human must open; `wait: true` polls until the human decides. No tool
-approves anything by itself, and the `beforeAction` gate lets the host
-require an extra operator confirmation for mutating tools.
+human must open; the agent then polls `trailgate.status` for the decision
+and calls `trailgate.redeem` once approved. No tool approves anything by
+itself or blocks waiting on the human, and the `beforeAction` gate lets
+the host require an extra operator confirmation for mutating tools.
 
 ## Claude API (no MCP host)
 

@@ -50,10 +50,39 @@ function fail(err: unknown): ToolResult {
   return okError('agent.error', err instanceof Error ? err.message : String(err));
 }
 
+/**
+ * Model-facing advice attached to failures. Denials are terminal from the
+ * agent's point of view: the correct response is to report back to the
+ * user, never to self-escalate with a fresh access request.
+ */
+function guidanceFor(code: string): string | undefined {
+  switch (code) {
+    case 'tg.request.permission_denied':
+    case 'tg.request.resource_denied':
+    case 'tg.request.grant_invalid':
+    case 'tg.request.grant_expired':
+    case 'tg.request.grant_revoked':
+    case 'agent.no_grant':
+    case 'agent.insufficient_permission':
+      return 'Access was denied. Do not start a new access request, retry a different way, or work around it. Report the missing permission to the user; only they can decide to grant more access.';
+    case 'tg.constraint.approval_required':
+      return 'This action needs the user to approve this specific charge. Share the approval URL and wait for them to decide; do not work around it or split the amount.';
+    case 'agent.denied':
+      return 'This action was refused. Stop and report back to the user instead of retrying.';
+    default:
+      return undefined;
+  }
+}
+
 function okError(code: string, message: string): ToolResult {
+  const error: Record<string, unknown> = { code, message };
+  const guidance = guidanceFor(code);
+  if (guidance !== undefined) {
+    error.guidance = guidance;
+  }
   return {
-    content: [{ type: 'text', text: JSON.stringify({ error: { code, message } }) }],
-    structuredContent: { error: { code, message } },
+    content: [{ type: 'text', text: JSON.stringify({ error }) }],
+    structuredContent: { error },
     isError: true,
   };
 }
@@ -203,7 +232,7 @@ export function createTrailGateTools(
     {
       name: 'trailgate.request',
       description:
-        'Start a TrailGate consent flow. Returns a consent_url for the user to open on the site; authority is only delegated after the user approves.',
+        "Create a NEW access request for a site. Call this only when the user's latest message explicitly asks to grant, connect, or expand access. Never call it in reaction to a denied action or an assumed need. It returns an approval link: relay the link to the user plainly and stop; nothing is authorized until they open it and decide. The user may approve a narrower scope than asked.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -211,12 +240,22 @@ export function createTrailGateTools(
           permissions: { type: 'array', items: { type: 'string' } },
           resources: { type: 'array', items: { type: 'string' } },
           constraints: { type: 'array', items: { type: 'object' } },
-          wait: { type: 'boolean', description: 'poll for the decision and redeem' },
+          user_authorized: {
+            type: 'boolean',
+            description:
+              'Must be true, and means the user explicitly asked for this new or expanded access in their latest message. False or missing rejects the call.',
+          },
         },
-        required: ['url', 'permissions'],
+        required: ['url', 'permissions', 'user_authorized'],
         additionalProperties: false,
       },
       handler: async (args) => {
+        if (args.user_authorized !== true) {
+          return okError(
+            'agent.denied',
+            'access requests require the user to explicitly ask for new or expanded access; relay what is missing and wait for them to decide',
+          );
+        }
         const denied = await gate('trailgate.request', args);
         if (denied !== undefined) {
           return denied;
@@ -227,15 +266,12 @@ export function createTrailGateTools(
             resources: stringList(args, 'resources'),
             constraints: (args.constraints as never) ?? [],
           });
-          if (args.wait === true) {
-            const grant = await client.awaitApproval(session.requestId);
-            return ok({ status: 'issued', grant: grantView(grant) });
-          }
           return ok({
             status: 'pending',
-            requestId: session.requestId,
             consentUrl: session.consentUrl,
+            requestId: session.requestId,
             expiresAt: session.expiresAt,
+            note: 'Share only the consentUrl with the user and wait for their decision; do not expose request internals.',
           });
         } catch (err) {
           return fail(err);
@@ -273,7 +309,7 @@ export function createTrailGateTools(
     {
       name: 'trailgate.access',
       description:
-        'Check whether a usable grant exists locally for a site and scope. Returns a distinguishable status (ready, no_grant, insufficient_permission, expired, wrong_key, revoked, unsupported_version). It never proves access: the site decides at enforcement.',
+        'Check whether usable access already exists locally for a site and scope before acting. Statuses: ready, no_grant, insufficient_permission, expired, wrong_key, revoked, unsupported_version. A shortfall means report it to the user, not start a new request. Never proves access: the site decides at enforcement.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -301,6 +337,12 @@ export function createTrailGateTools(
             view.site = result.site;
             view.client = result.client;
           }
+          if (result.status !== 'ready') {
+            const hint = guidanceFor(`agent.${result.status}`);
+            if (hint !== undefined) {
+              view.guidance = hint;
+            }
+          }
           return ok(view);
         } catch (err) {
           return fail(err);
@@ -310,7 +352,7 @@ export function createTrailGateTools(
     {
       name: 'trailgate.fetch',
       description:
-        "Send a TrailGate-signed request to a path on a discovered site. The target cannot leave the site origin; there is no way to sign or send to another origin. Denials return the site's tg.* code; receipts are verified against the site's published keys and reported honestly.",
+        "Send a signed request to a path on a site the user already authorized. The target cannot leave the site origin. If the site denies for missing permission or scope, report the denial to the user verbatim and stop; do not start a new access request. Receipts are verified against the site's published keys and reported honestly.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -348,9 +390,17 @@ export function createTrailGateTools(
           } catch {
             // Non-JSON bodies pass through as text.
           }
+          const hint = res.error !== undefined ? guidanceFor(res.error.code) : undefined;
           return ok({
             status: res.status,
-            ...(res.error !== undefined ? { error: res.error } : {}),
+            ...(res.error !== undefined
+              ? {
+                  error: {
+                    ...res.error,
+                    ...(hint !== undefined ? { guidance: hint } : {}),
+                  },
+                }
+              : {}),
             receipt:
               res.receipt === undefined
                 ? { present: false }

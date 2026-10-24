@@ -324,7 +324,12 @@ export function createAgentClient(options: AgentClientOptions = {}): AgentClient
         throw new AgentError('unknown_request', `no pending grant request ${requestId}`);
       }
       const context = await discover(record.siteOrigin);
-      await awaitConsentDecision(context, requestId, transport, opts);
+      // expiresAt is epoch seconds; the deadline defaults to the request's
+      // own expiry so an undecided request cannot poll forever.
+      await awaitConsentDecision(context, requestId, transport, {
+        ...opts,
+        timeoutMs: opts?.timeoutMs ?? Math.max(0, record.expiresAt * 1000 - Date.now()),
+      });
       return redeem(requestId);
     },
 

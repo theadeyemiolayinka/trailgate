@@ -11,7 +11,16 @@ Two layers:
 1. `createTrailGateTools(client)` returns plain tool descriptors (`name`, `description`, `inputSchema`, `handler`) - transport-neutral, MCP-SDK-free.
 2. `serveMcpStdio(tools, opts)` / the `trailgate-mcp` bin host those tools as a real MCP server: newline-delimited JSON-RPC 2.0 on stdio implementing `initialize`, `tools/list`, `tools/call`, `ping`. No external MCP SDK dependency; the adapter speaks the protocol subset tool hosts need.
 
-Tools: `trailgate.discover` (validated capability document), `trailgate.actions` (action catalog annotated with stored-grant coverage), `trailgate.request` (grant request, returns `consent_url`), `trailgate.status` (grant request status), `trailgate.access` (local access check against stored grants), `trailgate.fetch` (signed request to a discovered site), `trailgate.grants` (stored grant metadata), `trailgate.redeem` (redeem an approved request), `trailgate.revoke` (revoke a grant).
+Tools: `trailgate.discover` (validated capability document), `trailgate.actions` (action catalog annotated with stored-grant coverage), `trailgate.request` (grant request, returns `consentUrl`), `trailgate.status` (grant request status), `trailgate.access` (local access check against stored grants), `trailgate.fetch` (signed request to a discovered site), `trailgate.grants` (stored grant metadata), `trailgate.redeem` (redeem an approved request), `trailgate.revoke` (revoke a grant).
+
+### Escalation contract
+
+Existing grants are the only authority for ordinary work. The tool layer enforces this, not just descriptions:
+
+- `trailgate.request` requires `user_authorized: true`, which the model may only set when the user's latest message explicitly asked for new or expanded access. Missing or false rejects the call before any consent URL exists. The `beforeAction` gate runs on top of that check.
+- Denials (`tg.request.permission_denied`, `tg.request.resource_denied`, expired/revoked/invalid grants, `agent.no_grant`) return an `error.guidance` field telling the model to report the shortfall and wait, not self-escalate.
+- The consent page lets the user uncheck permissions before approving, so approved scope is always a subset of the requested scope. An approve with nothing checked is rejected rather than granting broad access.
+- Successful `trailgate.request` results carry a `note` instructing the model to relay only the consent URL and no protocol internals.
 
 ## Boundary rules (not provisional)
 

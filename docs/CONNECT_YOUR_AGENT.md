@@ -16,7 +16,7 @@ picks tools and reads results — it never touches key material.
 | --- | --- |
 | `trailgate.discover` | Validate a site's TrailGate support, return capabilities + actions |
 | `trailgate.actions` | List the action catalog with local grant coverage |
-| `trailgate.request` | Start a grant request; returns a consent URL for you |
+| `trailgate.request` | Start a grant request; returns a consent URL for you. Only works when you explicitly asked for access (`user_authorized`) |
 | `trailgate.status` | Check a pending request's consent state |
 | `trailgate.redeem` | Exchange an approved request for a grant (PKCE) |
 | `trailgate.access` | Local check: does a stored grant cover these permissions? |
@@ -86,7 +86,14 @@ Tell your agent (Devin, Claude, whatever is connected):
 The agent will call `trailgate.discover` -> `trailgate.actions` ->
 `trailgate.request`, which prints a `consentUrl`. **You** open that URL,
 sign in (`ada@example.com` / `demo-pass-1234`), review the scope, approve.
-Then tell it:
+On the consent page you can uncheck any permission you do not want to hand
+over; approval can only narrow the request, never widen it. An approve
+with nothing checked is refused.
+
+**The agent does not escalate on its own.** If an action is denied for
+missing access, it reports what it lacks and stops; a consent URL only
+appears after you explicitly ask it to request access. Denied? You decide
+whether to grant, not the agent. Then tell it:
 
 > "Redeem that request, then fetch my cart."
 

@@ -150,22 +150,60 @@ describe('createTrailGateTools', () => {
     assert.equal(parsed.protocolVersion, '0.1');
   });
 
-  it('request returns a consent session, wait redeems to metadata', async () => {
+  it('request returns a pending consent session without blocking', async () => {
     const pending = await tool(tools, 'trailgate.request').handler({
       url: 'https://shop.example.com',
       permissions: ['tg.order.create'],
+      user_authorized: true,
     });
     const parsed = JSON.parse(serialized(pending)) as Record<string, unknown>;
     assert.equal(parsed.status, 'pending');
     assert.ok(typeof parsed.consentUrl === 'string');
+    assert.ok(typeof parsed.requestId === 'string');
+  });
 
-    const issued = await tool(tools, 'trailgate.request').handler({
-      url: 'https://shop.example.com',
-      permissions: ['tg.order.create'],
-      wait: true,
+  it('refuses a new access request unless the user explicitly authorized it', async () => {
+    const gatedClient = fakeClient();
+    const gated = createTrailGateTools(gatedClient);
+    for (const args of [
+      { url: 'https://x.example.com', permissions: ['tg.a.b'] },
+      { url: 'https://x.example.com', permissions: ['tg.a.b'], user_authorized: false },
+      { url: 'https://x.example.com', permissions: ['tg.a.b'], user_authorized: 'yes' },
+    ]) {
+      const result = await tool(gated, 'trailgate.request').handler(args);
+      assert.equal(result.isError, true);
+      const parsed = JSON.parse(serialized(result)) as {
+        error: { code: string; guidance?: string };
+      };
+      assert.equal(parsed.error.code, 'agent.denied');
+      assert.ok(parsed.error.guidance?.includes('user'));
+    }
+    assert.ok(
+      !gatedClient.calls.includes('requestGrant'),
+      'the client is never reached without explicit user authorization',
+    );
+  });
+
+  it('attaches do-not-escalate guidance to permission denials', async () => {
+    const deniedClient = {
+      ...fakeClient(),
+      fetchProtected: async () => ({
+        status: 403,
+        headers: {},
+        body: new TextEncoder().encode('{"error":{"code":"x"}}'),
+        error: { code: 'tg.request.permission_denied', message: 'no' },
+      }),
+    };
+    const deniedTools = createTrailGateTools(deniedClient as never);
+    const result = await tool(deniedTools, 'trailgate.fetch').handler({
+      url: 'https://x.example.com',
+      target: '/api/orders',
     });
-    const issuedParsed = JSON.parse(serialized(issued)) as { grant?: { token?: string } };
-    assert.equal(issuedParsed.grant?.token, undefined, 'grant token must not reach the model');
+    const parsed = JSON.parse(serialized(result)) as {
+      error: { code: string; guidance?: string };
+    };
+    assert.equal(parsed.error.code, 'tg.request.permission_denied');
+    assert.ok(parsed.error.guidance?.includes('Do not start a new access request'));
   });
 
   it('never leaks secrets in any tool result', async () => {
@@ -175,7 +213,7 @@ describe('createTrailGateTools', () => {
       tool(tools, 'trailgate.request').handler({
         url: 'https://x.example.com',
         permissions: ['tg.a.b'],
-        wait: true,
+        user_authorized: true,
       }),
       tool(tools, 'trailgate.status').handler({
         url: 'https://x.example.com',
@@ -223,7 +261,12 @@ describe('createTrailGateTools', () => {
           ? { requestId: 'r' }
           : name === 'trailgate.revoke'
             ? { url: 'https://x.example.com', grantId: 'g' }
-            : { url: 'https://x.example.com', permissions: ['tg.a.b'], target: '/x' },
+            : {
+                url: 'https://x.example.com',
+                permissions: ['tg.a.b'],
+                target: '/x',
+                user_authorized: true,
+              },
       );
       assert.equal(result.isError, true, `${name} should be denied`);
     }

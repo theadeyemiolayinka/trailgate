@@ -110,6 +110,11 @@ export async function handleMcpMessage(
 /**
  * Serves MCP on stdin/stdout until stdin closes. `log` receives
  * human-facing lines destined for stderr; never write them to stdout.
+ *
+ * Messages dispatch concurrently: a long-running `tools/call` must not
+ * head-of-line block later requests (JSON-RPC responses may legitimately
+ * arrive out of order). In-flight handlers are drained before returning
+ * so shutdown cannot silently drop a response.
  */
 export async function serveMcpStdio(
   tools: readonly ToolDefinition[],
@@ -124,6 +129,7 @@ export async function serveMcpStdio(
   const output = options.output ?? process.stdout;
   const log = options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const byName = tools;
+  const inFlight = new Set<Promise<void>>();
   input.setEncoding('utf8');
   let buffer = '';
   for await (const chunk of input) {
@@ -143,17 +149,22 @@ export async function serveMcpStdio(
         output.write(`${rpcError(null, -32700, 'parse error')}\n`);
         continue;
       }
-      try {
-        const response = await handleMcpMessage(message, byName, options.serverInfo);
-        if (response !== undefined) {
-          output.write(`${response}\n`);
+      const task = (async (): Promise<void> => {
+        try {
+          const response = await handleMcpMessage(message, byName, options.serverInfo);
+          if (response !== undefined) {
+            output.write(`${response}\n`);
+          }
+        } catch (err) {
+          log(`handler failure: ${err instanceof Error ? err.message : String(err)}`);
+          if (message.id !== undefined && message.id !== null) {
+            output.write(`${rpcError(message.id, -32603, 'internal error')}\n`);
+          }
         }
-      } catch (err) {
-        log(`handler failure: ${err instanceof Error ? err.message : String(err)}`);
-        if (message.id !== undefined && message.id !== null) {
-          output.write(`${rpcError(message.id, -32603, 'internal error')}\n`);
-        }
-      }
+      })();
+      inFlight.add(task);
+      void task.finally(() => inFlight.delete(task));
     }
   }
+  await Promise.allSettled([...inFlight]);
 }

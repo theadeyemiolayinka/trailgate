@@ -122,8 +122,14 @@ describe('serveMcpStdio', () => {
     input.end();
     await done;
     assert.equal(lines.length, 3);
-    const second = JSON.parse(lines[1] as string) as { id: unknown; error: { code: number } };
-    assert.equal(second.error.code, -32700);
+    // Dispatch is concurrent: responses may arrive in any order.
+    const messages = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const parseError = messages.find((m) => m.error !== undefined) as
+      | { error: { code: number } }
+      | undefined;
+    assert.equal(parseError?.error.code, -32700);
+    const ids = messages.filter((m) => m.result !== undefined).map((m) => m.id);
+    assert.deepEqual(ids.sort(), [1, 2]);
   });
 });
 
