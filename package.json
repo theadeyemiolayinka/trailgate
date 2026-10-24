@@ -21,11 +21,14 @@
     "cli": "node packages/agent-cli/dist/cli.js",
     "mcp": "node packages/mcp-adapter/dist/mcp.js",
     "shop": "pnpm --dir apps/example-shop dev",
-    "shop:certs": "pnpm --dir apps/example-shop certs"
+    "shop:certs": "pnpm --dir apps/example-shop certs",
+    "bundle": "pnpm -r build && node scripts/bundle.mjs",
+    "embed": "node scripts/embed-schemas.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.2",
     "@types/node": "catalog:",
+    "esbuild": "0.25.12",
     "typescript": "catalog:"
   }
 }

@@ -2,7 +2,9 @@
 
 How a developer connects an AI agent to a TrailGate site. Uses the
 implemented surfaces only; host-specific notes are marked unverified where
-applicable.
+applicable. For packaging the agent as a distributable (single-file
+bundles, MCP client configs, two-laptop setup), see
+[INSTALL_AND_DEPLOY.md](INSTALL_AND_DEPLOY.md).
 
 ## The pieces
 

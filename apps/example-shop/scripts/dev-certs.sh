@@ -8,6 +8,10 @@
 #       export NODE_EXTRA_CA_CERTS=apps/example-shop/dev-certs/ca.crt
 #   - the browser trusts it after you import ca.crt as a trusted root
 #     (or accept the one-time warning)
+#
+# For cross-machine testing (agent on a second laptop), add the shop host's
+# LAN names so the certificate covers them:
+#   SHOP_CERT_SAN="DNS:shop-host.local,IP:192.168.1.20" pnpm certs
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)/dev-certs"
@@ -30,7 +34,7 @@ distinguished_name = dn
 req_extensions = ext
 [dn]
 [ext]
-subjectAltName = DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1
+subjectAltName = DNS:localhost,DNS:127.0.0.1,IP:127.0.0.1${SHOP_CERT_SAN:+,$SHOP_CERT_SAN}
 EOF
 
 openssl req -new -key server.key -subj "/CN=localhost/O=TrailGate dev" \

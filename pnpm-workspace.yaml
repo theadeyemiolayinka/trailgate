@@ -2,6 +2,11 @@ packages:
   - "packages/*"
   - "apps/*"
 
+allowBuilds:
+  # esbuild resolves its platform binary via optional deps; its install
+  # script is a no-op validator and is not needed.
+  esbuild: false
+
 catalog:
   "@types/node": "22.20.5"
   ajv: "8.20.0"

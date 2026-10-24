@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import { Codes, TrailGateError } from './errors.ts';
+import { EMBEDDED_SCHEMAS } from './schemas.embedded.ts';
 
 export const SCHEMA_IDS = {
   discovery: 'urn:trailgate:schemas:discovery',
@@ -22,8 +23,16 @@ export interface SchemaRegistry {
 
 function loadSpecSchemaFiles(): Map<string, Record<string, unknown>> {
   const dir = new URL('../../../spec/schemas/', import.meta.url);
+  let files: string[];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    // Bundled single-file builds have no spec/ tree on disk; the checked-in
+    // generated module (scripts/embed-schemas.mjs) carries the same schemas.
+    return new Map(Object.entries(EMBEDDED_SCHEMAS));
+  }
   const schemas = new Map<string, Record<string, unknown>>();
-  for (const file of readdirSync(dir)) {
+  for (const file of files) {
     if (!file.endsWith('.schema.json')) {
       continue;
     }

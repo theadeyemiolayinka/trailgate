@@ -109,7 +109,7 @@ export function startServer(): void {
 
   createHttpServer((req, res) => void route(app, req, res)).listen(
     config.httpPort,
-    '127.0.0.1',
+    config.host,
     () => {
       console.log(`ExampleShop storefront:  http://127.0.0.1:${config.httpPort}`);
       console.log(`TrailGate issuer identity: ${config.issuer}`);
@@ -122,7 +122,7 @@ export function startServer(): void {
     const tlsOptions = { key: readFileSync(keyPath), cert: readFileSync(certPath) };
     createHttpsServer(tlsOptions, (req, res) => void route(app, req, res)).listen(
       config.tlsPort,
-      '127.0.0.1',
+      config.host,
       () => {
         console.log(`TLS listener (issuer origin): https://localhost:${config.tlsPort}`);
       },

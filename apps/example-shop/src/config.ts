@@ -10,6 +10,8 @@ export interface ShopConfig {
    * shipped loopback transport maps it to the HTTP listener.
    */
   issuer: string;
+  /** Bind address for both listeners; use 0.0.0.0 for LAN testing. */
+  host: string;
   /** HTTP listener port for the shop UI and (dev) protocol traffic. */
   httpPort: number;
   /** HTTPS listener port used when dev certs exist; should match issuer's port. */
@@ -57,6 +59,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ShopConfig {
   }
   return {
     issuer: issuerUrl.origin,
+    host: env.SHOP_HOST ?? '127.0.0.1',
     httpPort: intFromEnv('SHOP_PORT', 3300),
     tlsPort,
     tls: env.SHOP_TLS === '1' || env.SHOP_TLS === 'true',
