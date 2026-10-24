@@ -46,9 +46,9 @@ pnpm verify
 | Command | What it does |
 | --- | --- |
 | `pnpm check` | Biome formatting and lint checks across the repo. |
+| `pnpm build` | `tsc` emit to `dist/` in every package. Runs before typecheck and test because workspace packages resolve each other through `dist/`. |
 | `pnpm typecheck` | `tsc --noEmit` in every package. |
 | `pnpm test` | `node --test` in every package. |
-| `pnpm build` | `tsc` emit to `dist/` in every package. |
 
 `pnpm format` applies Biome formatting. `pnpm lint` runs lint checks only.
 
@@ -59,6 +59,8 @@ pnpm verify
 - `internal/PHASES.md`: staged build plan and integration milestones.
 - `docs/architecture.md`: components and trust boundaries.
 - `docs/threat-model.md`: assets, attackers, surfaces, mitigations, open risks.
+- `docs/guides/quickstart.md`: verified external setup path.
+- `docs/limitations.md`: known limitations, honestly stated.
 - `docs/security-review-0.1.md`: adversarial audit of draft 0.1 core.
 - `docs/release-review-0.1.md`: requirement-to-test matrix, conformance findings, and the release decision.
 - `docs/security-guarantees.md`: what this repository does and does not guarantee.

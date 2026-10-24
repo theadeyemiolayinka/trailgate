@@ -10,10 +10,12 @@ Status: Phase 2 foundation on `@trailgate/agent`. Experimental; not production r
 
 ```sh
 trailgate keygen                              # new signing key in ./.trailgate/keys.json
+trailgate keys                                # list stored public key material
 trailgate discover https://shop.example.com   # validated capabilities + actions
 trailgate actions https://shop.example.com    # action catalog with grant coverage
 trailgate request https://shop.example.com \
     --permission tg.order.create --wait       # consent flow, poll + redeem
+trailgate access https://shop.example.com     # local check: what a stored grant covers
 trailgate fetch https://shop.example.com /api/orders --method POST
 trailgate grants                              # stored grant metadata
 trailgate status https://shop.example.com --grant-id <jti>

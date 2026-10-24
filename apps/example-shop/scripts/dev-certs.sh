@@ -10,7 +10,7 @@
 #     (or accept the one-time warning)
 set -euo pipefail
 
-DIR="$(cd "$(dirname "$0")/../dev-certs" && pwd)"
+DIR="$(cd "$(dirname "$0")/.." && pwd)/dev-certs"
 mkdir -p "$DIR"
 cd "$DIR"
 
