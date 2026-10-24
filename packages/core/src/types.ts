@@ -55,8 +55,11 @@ export interface DiscoveryAction {
   path: string;
   /** The `tg.*` permission the request must hold. */
   permission: string;
-  /** Short statement of what the action does. */
-  description?: string;
+  /**
+   * Short statement of what the action does. Required: it is the primary
+   * signal an agent uses to match intent to endpoint.
+   */
+  description: string;
   /** Whether the action changes state; absent means "treat as mutating". */
   mutates?: boolean;
   /** Resource selector template, e.g. `cart:{user}`. */

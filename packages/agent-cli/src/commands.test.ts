@@ -50,6 +50,7 @@ function fakeSite(agentJkt: { value?: string }) {
             method: 'POST',
             path: '/api/orders',
             permission: 'tg.order.create',
+            description: 'place an order',
             spend: true,
           },
         ];

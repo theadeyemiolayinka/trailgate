@@ -31,6 +31,7 @@ const CATALOG: DiscoveryAction[] = [
     method: 'GET',
     path: '/api/cart',
     permission: 'tg.cart.read',
+    description: 'read the shopping cart',
     mutates: false,
     resource: 'cart:{user}',
   },
@@ -39,6 +40,7 @@ const CATALOG: DiscoveryAction[] = [
     method: 'POST',
     path: '/api/orders/{id}/pay',
     permission: 'tg.wallet.charge',
+    description: 'pay an order from the wallet',
     resource: 'wallet:{user}',
     spend: true,
   },
@@ -47,6 +49,7 @@ const CATALOG: DiscoveryAction[] = [
     method: 'GET',
     path: '/api/products',
     permission: 'tg.catalog.read',
+    description: 'list the product catalog',
     mutates: false,
   },
 ];

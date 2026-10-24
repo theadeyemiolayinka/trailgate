@@ -43,19 +43,6 @@ function err(status: number, code: string, message: string): HostResponse {
   return json(status, { error: { code, message } });
 }
 
-function subjectOf(req: HostRequest): string | undefined {
-  const header = req.headers['trailgate-grant'];
-  if (header === undefined) {
-    return undefined;
-  }
-  try {
-    const payload = decodeCompactJws(header).payload as Partial<GrantPayload>;
-    return typeof payload.sub === 'string' ? payload.sub : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function matchPath(pattern: string, path: string): Record<string, string> | undefined {
   const want = pattern.split('/').filter((s) => s !== '');
   const got = path.split('/').filter((s) => s !== '');
@@ -263,10 +250,8 @@ export function createAgentApi(
       handle: tg.protect(
         {
           permission: 'tg.cart.read',
-          resource: (req) => {
-            const subject = subjectOf(req);
-            return subject === undefined ? undefined : cartSelector(subject);
-          },
+          resource: (_req, ctx) =>
+            ctx.subject === undefined ? undefined : cartSelector(ctx.subject),
           mutating: false,
           action: {
             id: 'cart.read',
@@ -285,10 +270,8 @@ export function createAgentApi(
       handle: tg.protect(
         {
           permission: 'tg.cart.write',
-          resource: (req) => {
-            const subject = subjectOf(req);
-            return subject === undefined ? undefined : cartSelector(subject);
-          },
+          resource: (_req, ctx) =>
+            ctx.subject === undefined ? undefined : cartSelector(ctx.subject),
           action: {
             id: 'cart.items.set',
             method: 'POST',
@@ -327,10 +310,8 @@ export function createAgentApi(
       handle: tg.protect(
         {
           permission: 'tg.cart.write',
-          resource: (req) => {
-            const subject = subjectOf(req);
-            return subject === undefined ? undefined : cartSelector(subject);
-          },
+          resource: (_req, ctx) =>
+            ctx.subject === undefined ? undefined : cartSelector(ctx.subject),
           action: {
             id: 'cart.items.remove',
             method: 'DELETE',
@@ -480,10 +461,8 @@ export function createAgentApi(
       handle: tg.protect(
         {
           permission: 'tg.wallet.charge',
-          resource: (req) => {
-            const subject = subjectOf(req);
-            return subject === undefined ? undefined : walletSelector(subject);
-          },
+          resource: (_req, ctx) =>
+            ctx.subject === undefined ? undefined : walletSelector(ctx.subject),
           amount: (req) => {
             const id = matchPath('/api/orders/:id/pay', new URL(req.url).pathname)?.['id'];
             if (id === undefined) {
@@ -536,10 +515,8 @@ export function createAgentApi(
       handle: tg.protect(
         {
           permission: 'tg.wallet.read',
-          resource: (req) => {
-            const subject = subjectOf(req);
-            return subject === undefined ? undefined : walletSelector(subject);
-          },
+          resource: (_req, ctx) =>
+            ctx.subject === undefined ? undefined : walletSelector(ctx.subject),
           mutating: false,
           action: {
             id: 'wallet.read',

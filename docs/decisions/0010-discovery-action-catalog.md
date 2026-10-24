@@ -20,8 +20,10 @@ not after a denial.
 
 The discovery document gains an optional `actions` array of action
 descriptors (spec section 5.2). Each descriptor declares `id`, `method`,
-`path` (a `{name}`-templated path), `permission`, and optionally
-`description`, `mutates`, `resource`, and `spend`.
+`path` (a `{name}`-templated path), `permission`, `description`, and
+optionally `mutates`, `resource`, and `spend`. `description` is required
+because it is the primary signal an agent uses to match intent to
+endpoint; an undescribed action is as easy to misuse as an unnamed one.
 
 Normative properties:
 

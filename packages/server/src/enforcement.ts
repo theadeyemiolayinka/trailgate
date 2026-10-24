@@ -28,6 +28,7 @@ import type {
   HostResponse,
   ProtectedHandler,
   RouteProtection,
+  SelectorContext,
 } from './types.ts';
 
 /** Response header carrying the receipt JWS (spec section 14.1). */
@@ -187,12 +188,28 @@ export async function verifyAgentRequest(
   });
 }
 
-function resolveAmount(route: RouteProtection, req: HostRequest): Money | undefined {
-  return typeof route.amount === 'function' ? route.amount(req) : route.amount;
+/** Verified selector context handed to route resolvers (spec section 11). */
+function selectorContext(grant: GrantPayload): SelectorContext {
+  return {
+    grant,
+    ...(grant.sub !== undefined ? { subject: grant.sub } : {}),
+  };
 }
 
-function resolveResource(route: RouteProtection, req: HostRequest): string | undefined {
-  return typeof route.resource === 'function' ? route.resource(req) : route.resource;
+function resolveAmount(
+  route: RouteProtection,
+  req: HostRequest,
+  ctx: SelectorContext,
+): Money | undefined {
+  return typeof route.amount === 'function' ? route.amount(req, ctx) : route.amount;
+}
+
+function resolveResource(
+  route: RouteProtection,
+  req: HostRequest,
+  ctx: SelectorContext,
+): string | undefined {
+  return typeof route.resource === 'function' ? route.resource(req, ctx) : route.resource;
 }
 
 function requestNonce(req: HostRequest): string | undefined {
@@ -225,10 +242,14 @@ function registerAction(route: RouteProtection, config: ResolvedServerConfig): v
   if (advertised === undefined) {
     return;
   }
-  if (advertised.id === '' || !/^[A-Z]+$/.test(advertised.method)) {
+  if (
+    advertised.id === '' ||
+    advertised.description === '' ||
+    !/^[A-Z]+$/.test(advertised.method)
+  ) {
     throw new TrailGateError(
       Codes.INTERNAL_ERROR,
-      `action '${advertised.id}' must declare a non-empty id and an uppercase method`,
+      `action '${advertised.id}' must declare a non-empty id, description, and an uppercase method`,
     );
   }
   if (!advertised.path.startsWith('/') || advertised.path.includes('://')) {
@@ -248,7 +269,7 @@ function registerAction(route: RouteProtection, config: ResolvedServerConfig): v
     method: advertised.method,
     path: advertised.path,
     permission: route.permission,
-    ...(advertised.description !== undefined ? { description: advertised.description } : {}),
+    description: advertised.description,
     mutates: route.mutating ?? true,
     ...(advertised.resource !== undefined ? { resource: advertised.resource } : {}),
     ...(advertised.spend !== undefined ? { spend: advertised.spend } : {}),
@@ -285,8 +306,6 @@ export function createProtectedHandler(
     } catch (err) {
       return denialResponse(err, req, config);
     }
-    const amount = resolveAmount(route, req);
-    const resource = resolveResource(route, req);
     let result: RequestVerificationResult;
     try {
       result = await verifyProtectedRequest(req, {
@@ -306,8 +325,17 @@ export function createProtectedHandler(
         ...(config.resourceOwners !== undefined ? { resourceOwners: config.resourceOwners } : {}),
         ...(config.policy !== undefined ? { policy: config.policy } : {}),
         requiredPermission: route.permission,
-        ...(amount !== undefined ? { requestAmount: amount } : {}),
-        ...(resource !== undefined ? { touchedResource: resource } : {}),
+        ...(route.amount !== undefined
+          ? {
+              resolveRequestAmount: (grant) => resolveAmount(route, req, selectorContext(grant)),
+            }
+          : {}),
+        ...(route.resource !== undefined
+          ? {
+              resolveTouchedResource: (grant) =>
+                resolveResource(route, req, selectorContext(grant)),
+            }
+          : {}),
       });
     } catch (err) {
       return denialResponse(err, req, config);
@@ -407,6 +435,7 @@ export function createProtectedHandler(
       }
     }
 
+    const amount = result.requestAmount;
     let reservation: Reservation | undefined;
     if (amount !== undefined) {
       const budgets = grant.tg.constraints

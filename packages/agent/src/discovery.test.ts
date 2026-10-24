@@ -125,6 +125,20 @@ describe('discovery caching (client)', () => {
     await client.discover(ORIGIN, { refresh: true });
     assert.equal(requests.length, 2);
   });
+
+  it('refetches automatically once the cached document ages out', async () => {
+    let now = 1_700_000_000;
+    const { transport, requests } = transportWith(makeDiscovery(), {
+      'cache-control': 'max-age=60',
+    });
+    const client = createAgentClient({ transport, clock: { now: () => now } });
+    await client.discover(ORIGIN);
+    await client.discover(ORIGIN);
+    assert.equal(requests.length, 1, 'within max-age the cache serves');
+    now += 61;
+    await client.discover(ORIGIN);
+    assert.equal(requests.length, 2, 'past max-age the document refetches');
+  });
 });
 
 describe('resolveSiteUrl', () => {

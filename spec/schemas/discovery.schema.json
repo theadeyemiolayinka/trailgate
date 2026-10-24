@@ -76,13 +76,13 @@
   "$defs": {
     "action": {
       "type": "object",
-      "required": ["id", "method", "path", "permission"],
+      "required": ["id", "method", "path", "permission", "description"],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "method": { "type": "string", "pattern": "^[A-Z]+$" },
         "path": { "type": "string", "pattern": "^/" },
         "permission": { "$ref": "#/$defs/permission" },
-        "description": { "type": "string" },
+        "description": { "type": "string", "minLength": 1 },
         "mutates": { "type": "boolean" },
         "resource": { "type": "string", "minLength": 1 },
         "spend": { "type": "boolean" }

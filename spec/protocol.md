@@ -91,7 +91,7 @@ Optional `actions` array: declarative descriptors of the site's protected routes
 | `method` | yes | Uppercase HTTP method of the protected route. |
 | `path` | yes | Absolute path template. `{name}` marks a path parameter the caller substitutes; all other segments are literal. The substituted path MUST resolve inside the site origin. |
 | `permission` | yes | The `tg.*` permission the request must hold; MUST appear in the document's `permissions`. |
-| `description` | no | Short statement of what the action does, for humans and models. |
+| `description` | yes | Short statement of what the action does, for humans and models. Required because it is the primary signal an agent uses to match intent to endpoint; sites MUST NOT publish vague placeholders. |
 | `mutates` | no | Whether the action changes state. When absent, agents MUST treat the action as mutating (the safe default). |
 | `resource` | no | Resource selector template the action touches (for example `cart:{user}`); `{user}` denotes the subject-derived part resolved at enforcement. |
 | `spend` | no | When true, the action may charge money, so spend constraints such as `max_amount`, `cumulative_budget`, or `spend_window` can deny it. |

@@ -103,18 +103,34 @@ export interface ActionAdvertisement {
   method: string;
   /** Absolute path template; `{name}` marks a path parameter. */
   path: string;
-  /** Short statement of what the action does, for humans and models. */
-  description?: string;
+  /**
+   * Short statement of what the action does, for humans and models.
+   * Required: it is the primary signal an agent uses to match intent.
+   */
+  description: string;
   /** Resource selector template, e.g. `cart:{user}`; names structure, never data. */
   resource?: string;
   /** When true, the action may charge money and spend constraints apply. */
   spend?: boolean;
 }
 
+/**
+ * Verified context handed to `resource` and `amount` resolvers. Populated
+ * from the verified grant payload inside the enforcement pipeline, so
+ * resolvers derive selectors and amounts from claims the pipeline already
+ * authenticated rather than re-parsing the raw `trailgate-grant` header.
+ */
+export interface SelectorContext {
+  /** `sub` of the verified grant; undefined when the grant carries none. */
+  subject?: string;
+  /** The verified grant payload. */
+  grant: GrantPayload;
+}
+
 export interface RouteProtection {
   permission: string;
-  resource?: string | ((req: HostRequest) => string | undefined);
-  amount?: Money | ((req: HostRequest) => Money | undefined);
+  resource?: string | ((req: HostRequest, ctx: SelectorContext) => string | undefined);
+  amount?: Money | ((req: HostRequest, ctx: SelectorContext) => Money | undefined);
   /**
    * Whether this endpoint stores an idempotency record (spec section 11.4).
    * Mutating endpoints MUST set or leave this at the default `true`. Read-only

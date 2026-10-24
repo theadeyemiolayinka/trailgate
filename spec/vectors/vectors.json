@@ -75,7 +75,8 @@
             "path": "/api/orders/{id}/pay",
             "permission": "tg.wallet.charge",
             "resource": "wallet:{user}",
-            "spend": true
+            "spend": true,
+            "description": "pay an order from the wallet"
           }
         ]
       },
@@ -112,7 +113,8 @@
           {
             "id": "x",
             "method": "GET",
-            "path": "https://evil.example/x"
+            "path": "https://evil.example/x",
+            "description": "x action"
           }
         ]
       },

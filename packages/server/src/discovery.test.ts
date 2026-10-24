@@ -96,7 +96,7 @@ describe('discovery document', () => {
         server.protect(
           {
             permission: 'tg.order.create',
-            action: { id: 'bad', method: 'post', path: '/x' },
+            action: { id: 'bad', method: 'post', path: '/x', description: 'bad method' },
           },
           () => ({ status: 200 }),
         ),
@@ -107,7 +107,12 @@ describe('discovery document', () => {
         server.protect(
           {
             permission: 'tg.order.create',
-            action: { id: 'bad2', method: 'POST', path: 'https://evil.example/x' },
+            action: {
+              id: 'bad2',
+              method: 'POST',
+              path: 'https://evil.example/x',
+              description: 'bad path',
+            },
           },
           () => ({ status: 200 }),
         ),
@@ -116,7 +121,7 @@ describe('discovery document', () => {
     server.protect(
       {
         permission: 'tg.order.create',
-        action: { id: 'dup', method: 'GET', path: '/a' },
+        action: { id: 'dup', method: 'GET', path: '/a', description: 'first' },
       },
       () => ({ status: 200 }),
     );
@@ -125,7 +130,22 @@ describe('discovery document', () => {
         server.protect(
           {
             permission: 'tg.order.create',
-            action: { id: 'dup', method: 'POST', path: '/b' },
+            action: { id: 'dup', method: 'POST', path: '/b', description: 'second' },
+          },
+          () => ({ status: 200 }),
+        ),
+      (err: unknown) => err instanceof TrailGateError && err.code === Codes.INTERNAL_ERROR,
+    );
+  });
+
+  it('rejects an action without a description', () => {
+    const server = makeServer();
+    assert.throws(
+      () =>
+        server.protect(
+          {
+            permission: 'tg.order.create',
+            action: { id: 'nodesc', method: 'GET', path: '/a', description: '' },
           },
           () => ({ status: 200 }),
         ),
@@ -140,7 +160,7 @@ describe('discovery document', () => {
         server.protect(
           {
             permission: 'tg.wallet.charge',
-            action: { id: 'wallet.charge', method: 'POST', path: '/pay' },
+            action: { id: 'wallet.charge', method: 'POST', path: '/pay', description: 'charge' },
           },
           () => ({ status: 200 }),
         ),

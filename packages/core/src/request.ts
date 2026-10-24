@@ -59,7 +59,19 @@ export interface RequestVerificationDeps {
   knownCriticalFields?: readonly string[];
   requiredPermission?: string;
   requestAmount?: Money;
+  /**
+   * Resolves the request amount from the verified grant, evaluated after
+   * grant verification. Takes precedence over a static `requestAmount`.
+   */
+  resolveRequestAmount?: (grant: GrantPayload) => Money | undefined;
   touchedResource?: string;
+  /**
+   * Resolves the touched resource selector from the verified grant, so host
+   * resolvers derive selectors from verified claims rather than re-parsing
+   * the raw `trailgate-grant` header. Takes precedence over a static
+   * `touchedResource`.
+   */
+  resolveTouchedResource?: (grant: GrantPayload) => string | undefined;
 }
 
 export interface RequestVerificationResult {
@@ -68,6 +80,10 @@ export interface RequestVerificationResult {
   signatureBase: string;
   idempotentReplay: boolean;
   context: VerifiedRequestContext;
+  /** The amount the request was evaluated against, when the route declared one. */
+  requestAmount?: Money;
+  /** The resource selector the request was checked against, when resolved. */
+  touchedResource?: string;
 }
 
 const REQUIRED_HEADERS = [
@@ -233,24 +249,26 @@ export async function verifyProtectedRequest(
     assertPermissionGranted(grant.tg.permissions, deps.requiredPermission);
   }
 
-  if (deps.touchedResource !== undefined) {
+  const touchedResource = deps.resolveTouchedResource?.(grant) ?? deps.touchedResource;
+  if (touchedResource !== undefined) {
     if (deps.resourceOwners === undefined) {
       throw new TrailGateError(Codes.INTERNAL_UNAVAILABLE, 'resource ownership cannot be checked');
     }
     await assertResourceAllowed(
       grant.tg.resources,
-      deps.touchedResource,
+      touchedResource,
       deps.resourceOwners,
       grant.sub,
     );
   }
 
+  const requestAmount = deps.resolveRequestAmount?.(grant) ?? deps.requestAmount;
   await evaluateConstraints(grant.tg.constraints, {
     grantId: grant.jti,
     now: clock.now(),
     ...(deps.ledger !== undefined ? { ledger: deps.ledger } : {}),
     ...(deps.rateLimiter !== undefined ? { rateLimiter: deps.rateLimiter } : {}),
-    ...(deps.requestAmount !== undefined ? { requestAmount: deps.requestAmount } : {}),
+    ...(requestAmount !== undefined ? { requestAmount } : {}),
   });
 
   const context: VerifiedRequestContext = {
@@ -273,5 +291,13 @@ export async function verifyProtectedRequest(
     }
   }
 
-  return { grant, requestDigest, signatureBase, idempotentReplay, context };
+  return {
+    grant,
+    requestDigest,
+    signatureBase,
+    idempotentReplay,
+    context,
+    ...(requestAmount !== undefined ? { requestAmount } : {}),
+    ...(touchedResource !== undefined ? { touchedResource } : {}),
+  };
 }
