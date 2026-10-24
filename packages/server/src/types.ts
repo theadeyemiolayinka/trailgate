@@ -86,8 +86,9 @@ export interface GrantStatusResponse {
 /**
  * Per-route protection declaration. `permission` is the `tg.*` identifier the
  * grant must carry. `resource` is the selector this request touches
- * (spec section 8). `amount` is the monetary amount this request will spend,
- * in integer minor units, used for `max_amount`/`cumulative_budget`
+ * (spec section 8). `amount` is the metered amount this request will spend,
+ * in integer units (spec section 3: ISO 4217 for money, site-defined codes
+ * for other meters), used for `max_amount`/`cumulative_budget`
  * evaluation and the reservation lifecycle (spec sections 9 and 12).
  */
 /**

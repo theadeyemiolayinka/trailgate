@@ -10,7 +10,7 @@ Status: Phase 4 boundary draft. The tool surface is defined and tested here; wir
 
 `createTrailGateTools(client)` returns plain tool descriptors (`name`, `description`, `inputSchema`, `handler`) that a thin adapter maps onto an MCP server's `tool()` registration. Keeping the boundary MCP-SDK-free means the protocol and the ordinary SDK carry no dependency on a particular agent runtime.
 
-Tools: `trailgate.discover`, `trailgate.request`, `trailgate.status`, `trailgate.fetch`, `trailgate.grants`, `trailgate.redeem`.
+Tools: `trailgate.discover` (validated capability document), `trailgate.actions` (action catalog annotated with stored-grant coverage), `trailgate.request` (grant request, returns `consent_url`), `trailgate.status` (grant request status), `trailgate.access` (local access check against stored grants), `trailgate.fetch` (signed request to a discovered site), `trailgate.grants` (stored grant metadata), `trailgate.redeem` (redeem an approved request), `trailgate.revoke` (revoke a grant).
 
 ## Boundary rules (not provisional)
 

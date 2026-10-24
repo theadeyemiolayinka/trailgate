@@ -2,6 +2,12 @@ export type ProtocolVersion = '0.1';
 
 export type Permission = `tg.${string}.${string}`;
 
+/**
+ * A metered quantity (spec section 3): integer units plus an uppercase unit
+ * code. `currency` is ISO 4217 for real money and may be a site-defined code
+ * (for example `XCR` for credits, `XREQ` for API calls) for anything else.
+ * The name is kept for wire compatibility; matching is exact-string.
+ */
 export interface Money {
   amount: number;
   currency: string;

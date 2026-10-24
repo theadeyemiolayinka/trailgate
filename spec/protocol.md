@@ -39,7 +39,7 @@ Trust boundaries (authoritative list):
 
 - Timestamps: integer seconds since the Unix epoch (JWT `NumericDate` semantics). Fields are named `*_at` or use standard JWT claim names.
 - Identifiers: opaque strings with at least 128 bits of entropy. UUIDv7 or base64url-encoded random values are RECOMMENDED. Identifiers carry no personal information.
-- Money: integer minor units plus an ISO 4217 currency code, represented as `{ "amount": <integer>, "currency": "XXX" }`. Floating-point values MUST NOT appear in authoritative contexts.
+- Metered quantities: integer units plus an uppercase unit code, represented as `{ "amount": <integer>, "currency": "XXX" }`. The field name is `currency` for wire compatibility; the value is a unit code, not necessarily legal tender. Sites charging real money MUST use ISO 4217 codes. Sites metering anything else (credits, API calls, tokens, storage bytes) MAY use site-defined codes, which SHOULD begin with `X` to avoid colliding with assigned ISO 4217 codes (for example `XCR` for credits). Matching is exact-string; there is no conversion between codes. Floating-point values MUST NOT appear in authoritative contexts.
 - Key representation: JWK (RFC 7517). Public keys only appear in protocol messages. A key is identified by its SHA-256 JWK thumbprint (RFC 7638), base64url-encoded, written `jkt`.
 - Signature algorithms: Ed25519 signing is REQUIRED to implement; ECDSA P-256 with SHA-256 is OPTIONAL. Two registries apply and their names MUST NOT be interchanged: JWS `alg` values for grants and receipts are JOSE names `EdDSA` and `ES256`; RFC 9421 `alg` signature parameters for request signatures are `ed25519` and `ecdsa-p256-sha256`. Any other algorithm MUST be rejected unless a future spec version registers it.
 - Error handling: failures produce structured error responses per `spec/errors.md`. Codes are stable strings of the form `tg.<domain>.<name>`.
@@ -166,12 +166,14 @@ A constraint is `{ "type": "<name>", "params": { ... } }`. The `type` registry i
 
 | Type | Params | Semantics |
 | --- | --- | --- |
-| `max_amount` | `{ "amount": int, "currency": "XXX" }` | Any single request carrying a monetary amount MUST NOT exceed `amount` minor units of `currency`. Requests in a different currency fail unless the site converts at its own authoritative rate and the result complies. |
-| `cumulative_budget` | `{ "amount": int, "currency": "XXX" }` | The sum of consumed ledger entries under this grant MUST NOT exceed `amount` minor units. Enforced via the reservation lifecycle in section 12. |
+| `max_amount` | `{ "amount": int, "currency": "XXX" }` | Any single request carrying a metered amount MUST NOT exceed `amount` units of `currency`. Requests carrying a different unit code fail unless the site converts at its own authoritative rate and the result complies. |
+| `cumulative_budget` | `{ "amount": int, "currency": "XXX" }` | The sum of consumed ledger entries under this grant MUST NOT exceed `amount` units. Enforced via the reservation lifecycle in section 12. |
 | `rate_limit` | `{ "max_requests": int, "window_seconds": int }` | At most `max_requests` protected requests per rolling `window_seconds` under this grant. |
 | `valid_window` | `{ "not_before": int, "not_after": int }` | Requests outside `[not_before, not_after]` unix seconds are denied. Narrower than `exp`; both apply. |
-| `spend_window` | `{ "amount": int, "currency": "XXX", "window_seconds": int }` | The sum of consumed ledger entries in the last `window_seconds` (rolling) plus live reservations and this request MUST NOT exceed `amount` minor units. Enforced inside the atomic reservation check per section 12. |
-| `approval_threshold` | `{ "amount": int, "currency": "XXX" }` | A request carrying a monetary amount above `amount` minor units MUST be denied with `tg.constraint.approval_required` until the grant subject records a per-operation human approval (section 12.4). A different currency fails closed. |
+| `spend_window` | `{ "amount": int, "currency": "XXX", "window_seconds": int }` | The sum of consumed ledger entries in the last `window_seconds` (rolling) plus live reservations and this request MUST NOT exceed `amount` units. Enforced inside the atomic reservation check per section 12. |
+| `approval_threshold` | `{ "amount": int, "currency": "XXX" }` | A request carrying a metered amount above `amount` units MUST be denied with `tg.constraint.approval_required` until the grant subject records a per-operation human approval (section 12.4). A different unit code fails closed. |
+
+`amount`/`currency` here is the generic metered quantity defined in section 3. A shop uses it for money (`USD`); an API gateway can use the same four constraints with a site-defined unit code to bound request counts (`XREQ`), token throughput (`XTOK`), or bytes (`XGB`) without any protocol change.
 
 Only the types in this table are registered for 0.1. Everything else is unsupported and fails closed, never silently ignored:
 
@@ -286,7 +288,7 @@ Any required check the site cannot perform (signature verification infrastructur
 
 ## 12. Spending semantics
 
-- Amounts are integer minor units plus ISO 4217 currency. There are no fractional minor units.
+- Amounts are integer units plus a unit code (section 3). There are no fractional units.
 - The ledger is authoritative server state. A spending request proceeds as:
   1. `reserve`: atomically check the constraint set and the grant's remaining `cumulative_budget` and `spend_window` headroom and insert a reservation entry. Atomicity is REQUIRED: the headroom check and the reservation insert are one operation, so two concurrent requests cannot both observe the same headroom. For `spend_window`, headroom is the window limit minus consumed-in-window minus live reservations.
   2. `consume`: on successful operation, the reservation converts to a consumed entry.

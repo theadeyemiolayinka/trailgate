@@ -51,6 +51,7 @@ const tg = createTrailGateServer({
 | `GET /tg/grant-status` | `tg.handleStatus(req)` | section 10.5 |
 | `POST /tg/grant-revocation` | `tg.handleRevocation(req)` | section 13 |
 | site admin / user settings | `tg.revokeGrant(jti, { reason, actor })` | section 13 |
+| per-request approval page (host UI) | `tg.decideRequestApproval(id, decision, siteUserId)` | section 12.4 |
 | protected routes | `tg.protect(route, handler)` | section 11 |
 
 `HostRequest` is `{ method, url, headers, body? }`. `url` must be the absolute
@@ -107,6 +108,14 @@ whole spec section 11.3 checklist, then:
   handler, so every domain call the handler makes runs inside the enforced
   boundary; handlers read the verified `ctx.subject` and `ctx.grant` rather
   than re-parsing request tokens deeper in the call graph,
+- enforces `approval_threshold` (spec section 12.4): a monetary request above
+  the threshold denies with `tg.constraint.approval_required` and a
+  `detail.approval_url` pointing at `paths.requestApproval`. The host renders
+  that page behind its own auth, reads the record from
+  `stores.approvals.get(id)`, and calls
+  `tg.decideRequestApproval(id, 'approve' | 'deny', siteUserId)`; only the
+  grant subject may decide. An approval executes exactly one operation and is
+  consumed atomically,
 - returns a signed receipt in the `trailgate-receipt` response header
   (spec section 14.1),
 - returns signed denial receipts when the request was parseable enough to
@@ -172,6 +181,7 @@ agents; enforcement is unaffected whether a route advertises or not.
 | `defaultGrantSeconds` | | 3600 | Grant lifetime when the agent does not request one. |
 | `maxGrantSeconds` | | none | Ceiling on grant lifetime; advertised when set. |
 | `reservationTtlSeconds` | | 300 | Reservation auto-release TTL. |
+| `requestApprovalTtlSeconds` | | 600 | Pending/approved `approval_threshold` record lifetime. |
 
 ## Stores
 
@@ -188,6 +198,7 @@ single-process demos only. For deployment, implement the ports in
 | `RequestIdempotencyStore` | `claim` must be an atomic insert-if-absent returning `claimed`/`existing`/`conflict`; `record` must not overwrite a record with a different operation digest. |
 | `SpendingLedger` | `reserve` must check `cumulative_budget` and `spend_window` headroom and insert in one atomic operation; TTL release for abandoned reservations. `consumedInWindow` is required when grants carry `spend_window`. |
 | `RequestRateLimiter` | Rolling-window per-grant request count. |
+| `RequestApprovalStore` | `decide` and `consumeApproved` must be atomic transitions (`pending -> approved|denied`, `approved -> used`); `requestApproval` dedupes on live pending/approved records for the same `(grant_id, operation_digest)`; expired records are invisible. |
 | `AuditSink` | Append-only; returns the event id embedded in receipts. |
 
 Fail closed: when a security-critical store cannot be consulted, the pipeline
@@ -215,6 +226,11 @@ Suggested schema per store. Times are integer unix seconds.
   `reserve` must run the headroom check and insert in one transaction.
 - `rate_hits`: `(grant_id, at)` appended per authenticated request;
   `countInWindow` is a range count.
+- `request_approvals`: `(id, grant_id, operation_digest, amount, currency,
+  state, created_at, expires_at, decided_at)`; `decide` is
+  `UPDATE ... WHERE id=? AND state='pending' AND expires_at>?` and
+  `consumeApproved` selects then updates `approved -> used` in one
+  transaction.
 - `audit`: append-only `(id, event)` rows; never updated or deleted.
 
 ## Framework integration notes

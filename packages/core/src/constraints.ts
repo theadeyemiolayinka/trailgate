@@ -45,7 +45,7 @@ function checkMoneyShape(params: Record<string, unknown>): { amount: number; cur
   if (typeof currency !== 'string' || !/^[A-Z]{3}$/.test(currency)) {
     throw new TrailGateError(
       Codes.CONSTRAINT_VIOLATED,
-      'constraint param currency is not iso 4217',
+      'constraint param currency is not a valid unit code',
     );
   }
   return { amount, currency };

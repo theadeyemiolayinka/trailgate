@@ -59,7 +59,8 @@ pnpm verify
 - `internal/PHASES.md`: staged build plan and integration milestones.
 - `docs/architecture.md`: components and trust boundaries.
 - `docs/threat-model.md`: assets, attackers, surfaces, mitigations, open risks.
-- `docs/security-review-0.1.md`: adversarial audit findings and requirement-to-test matrix.
+- `docs/security-review-0.1.md`: adversarial audit of draft 0.1 core.
+- `docs/release-review-0.1.md`: requirement-to-test matrix, conformance findings, and the release decision.
 - `docs/security-guarantees.md`: what this repository does and does not guarantee.
 - `docs/decisions/`: architecture decision records.
 - `docs/research/protocol-references.md`: standards research behind the contract.
@@ -68,4 +69,4 @@ pnpm verify
 
 ## License
 
-Not selected yet. See `LICENSE`. Until a license is chosen, all rights are reserved and the project is not open source under any specific license.
+MIT. See `LICENSE`.

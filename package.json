@@ -9,7 +9,7 @@
     "node": ">=22.18",
     "pnpm": ">=11.3"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",

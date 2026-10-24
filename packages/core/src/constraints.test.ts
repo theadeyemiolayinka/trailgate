@@ -49,6 +49,29 @@ describe('evaluateConstraints', () => {
     await evaluateConstraints([c], BASE);
   });
 
+  it('meters site-defined unit codes the same way as ISO currencies', async () => {
+    // Spec section 3: `currency` is a generic unit code. A site metering API
+    // calls can bound them with the same constraint shape, no money involved.
+    const c: Constraint = { type: 'max_amount', params: { amount: 100, currency: 'XCR' } };
+    await evaluateConstraints([c], {
+      ...BASE,
+      requestAmount: { amount: 100, currency: 'XCR' },
+    });
+    await expectCode(Codes.CONSTRAINT_VIOLATED, () =>
+      evaluateConstraints([c], {
+        ...BASE,
+        requestAmount: { amount: 101, currency: 'XCR' },
+      }),
+    );
+    // Exact-string matching: a different unit is not silently converted.
+    await expectCode(Codes.CONSTRAINT_VIOLATED, () =>
+      evaluateConstraints([c], {
+        ...BASE,
+        requestAmount: { amount: 50, currency: 'XTK' },
+      }),
+    );
+  });
+
   it('enforces cumulative_budget against ledger totals', async () => {
     const c: Constraint = { type: 'cumulative_budget', params: { amount: 20000, currency: 'USD' } };
     await evaluateConstraints([c], {

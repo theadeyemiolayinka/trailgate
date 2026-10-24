@@ -47,7 +47,7 @@
               "currency": {
                 "type": "string",
                 "pattern": "^[A-Z]{3}$",
-                "description": "ISO 4217 currency code"
+                "description": "unit code: ISO 4217 for real currency, site-defined (X-prefixed) for metered units"
               },
               "window_seconds": { "type": "integer", "minimum": 1 }
             },
@@ -84,7 +84,7 @@
         "currency": {
           "type": "string",
           "pattern": "^[A-Z]{3}$",
-          "description": "ISO 4217 currency code"
+          "description": "unit code: ISO 4217 for real currency, site-defined (X-prefixed) for metered units"
         }
       },
       "additionalProperties": false

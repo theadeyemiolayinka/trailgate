@@ -35,6 +35,18 @@ res.receipt;     // verified receipt bound to the exact signed request
 
 Redirect mode: pass `redirectUri` and `state` to `requestGrant`, hand the callback URL to `client.handleConsentCallback(requestId, url)`, then `client.redeemGrant(requestId)`.
 
+## Capability discovery and intent mapping
+
+`client.listActions(site)` returns the site's advertised action catalog (spec section 5.2): each entry carries `id`, `method`, `path`, `permission`, `description`, `mutates`, and `spend`, annotated with whether a stored grant covers it. An agent runtime maps user intent ("check my cart") to an action by its `description`, then requests the listed permission when coverage is missing. Discovery results cache per origin for the document's `max-age` (capped at 24 h); `client.discover(url, { refresh: true })` forces a refetch, and `FileDiscoveryCache` persists the cache across processes.
+
+## Per-request approvals
+
+A grant carrying `approval_threshold` can deny a high-value request with `tg.constraint.approval_required`. The denial's `error.detail` then carries `approval_url`, the site's human decision surface: hand it to the user, and after they approve on the site, retry the identical request. An approval executes exactly once, binds to the exact operation, and is subject-only (spec section 12.4).
+
+## Key custody
+
+`AgentSigner` is the custody boundary; it never exports private key material. `SoftwareKeyProvider` (process memory) and `FileKeyProvider` (0600 file) are development-grade. Production agents should inject an OS- or hardware-backed implementation of the same interface. See `KEYS.md`.
+
 ## What it does
 
 - Discovery per spec section 5: HTTPS only, no redirects, schema and same-origin validation, `critical` handling, version negotiation, `Cache-Control`-aware caching capped at 24 h.

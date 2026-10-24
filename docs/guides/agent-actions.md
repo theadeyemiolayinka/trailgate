@@ -34,6 +34,13 @@ without hardcoded routes and without silently granting itself access.
    `tg.constraint.spend_window`, `tg.grant.revoked`). Branch on codes, never
    message text. A verified receipt (`response.receipt.verified === true`)
    is durable evidence of the decision.
+7. **Route human decisions.** `tg.constraint.approval_required` means the
+   operation crossed an `approval_threshold`. The denial's
+   `error.detail.approval_url` is the site's decision surface: present it to
+   the user exactly like `consent_url`, then retry the identical request
+   after they approve. An approval is single-use and bound to the exact
+   operation; never retry with altered parameters expecting it to carry
+   over (spec section 12.4).
 
 ## Mapping intent
 
